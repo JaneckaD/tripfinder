@@ -114,3 +114,95 @@ export function createDirections({ cached }) {
     }
   };
 }
+
+// ---------- Hidden gems (OpenStreetMap + fotky z Wikimedia Commons) ----------
+// Méně známá místa: vyhlídky, vodopády, jeskyně, prameny, zříceniny… která mají jméno, ale nemají
+// článek na Wikipedii (ty už ukazuje běžná vrstva). Fotku dohledáme mezi geotagovanými snímky na Commons.
+const GEM_KIND = {
+  viewpoint: ['🔭', 'Vyhlídka', 'nature'], waterfall: ['💧', 'Vodopád', 'nature'], cave_entrance: ['🕳️', 'Jeskyně', 'nature'],
+  spring: ['⛲', 'Pramen', 'nature'], hot_spring: ['♨️', 'Termální pramen', 'nature'], peak: ['⛰️', 'Vrchol', 'nature'],
+  arch: ['🌉', 'Skalní brána', 'nature'], rock: ['🪨', 'Skála', 'nature'], beach: ['🏖️', 'Pláž', 'nature'], gorge: ['🏞️', 'Soutěska', 'nature'],
+  ruins: ['🏚️', 'Zřícenina', 'sight'], castle: ['🏰', 'Hrad', 'sight'], wayside_shrine: ['🛕', 'Kaplička', 'sight'],
+  picnic_site: ['🧺', 'Piknikové místo', 'nature'], attraction: ['✨', 'Zajímavost', 'sight'], artwork: ['🎨', 'Umění', 'culture'],
+};
+
+async function overpassGems(lat, lng, r) {
+  const around = `(around:${r},${lat},${lng})`;
+  const q = `[out:json][timeout:20];(
+    node["tourism"~"^(viewpoint|attraction|artwork|picnic_site)$"]["name"]${around};
+    node["natural"~"^(waterfall|cave_entrance|spring|hot_spring|peak|arch|rock|beach|gorge)$"]["name"]${around};
+    nwr["historic"~"^(ruins|castle|wayside_shrine)$"]["name"]${around};
+  );out center 400;`;
+  const res = await getJson(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(q)}`, { headers: UA, timeoutMs: 25000 });
+  return (res.elements || []).map((e) => {
+    const t = e.tags || {};
+    const kind = t.natural || t.historic || t.tourism;
+    const [emoji, label, category] = GEM_KIND[kind] || ['✨', 'Zajímavost', 'other'];
+    const plat = e.lat ?? e.center?.lat; const plng = e.lon ?? e.center?.lon;
+    return {
+      id: `osm:${e.type[0]}${e.id}`, title: t['name:cs'] || t.name, description: [label, t.ele ? `${Math.round(t.ele)} m n. m.` : ''].filter(Boolean).join(' · '),
+      lat: plat, lng: plng, emoji, category, gem: true, famous: Boolean(t.wikipedia || t.wikidata),
+      image: /^https:\/\//.test(t.image || '') ? t.image : null, osm: `https://www.openstreetmap.org/${e.type}/${e.id}`,
+    };
+  }).filter((g) => g.title && Number.isFinite(g.lat));
+}
+
+async function commonsPhotos(lat, lng, r) {
+  const res = await getJson(`https://commons.wikimedia.org/w/api.php?${new URLSearchParams({
+    action: 'query', format: 'json', formatversion: '2', generator: 'geosearch', ggsnamespace: '6', ggscoord: `${lat}|${lng}`,
+    ggsradius: String(r), ggslimit: '100', prop: 'coordinates|imageinfo', iiprop: 'url', iiurlwidth: '480',
+  })}`, { headers: UA, timeoutMs: 12000 });
+  return (res.query?.pages || []).filter((p) => p.coordinates?.[0] && p.imageinfo?.[0]?.thumburl)
+    .map((p) => ({ lat: p.coordinates[0].lat, lng: p.coordinates[0].lon, thumb: p.imageinfo[0].thumburl, page: p.imageinfo[0].descriptionurl }));
+}
+
+export function createGems({ cached }) {
+  return async function gems(lat, lng, radius = 8000) {
+    const la = Math.round(lat * 50) / 50; const ln = Math.round(lng * 50) / 50;
+    const r = Math.min(10000, Math.max(2000, Math.round(radius / 1000) * 1000));
+    return cached(`gems:${la},${ln}:${r}`, 7 * DAY, async () => {
+      const [g, ph] = await Promise.allSettled([overpassGems(la, ln, r), commonsPhotos(la, ln, r)]);
+      if (g.status === 'rejected') throw g.reason;
+      const photos = ph.value || [];
+      const out = [];
+      for (const gem of g.value.filter((x) => !x.famous)) {
+        if (out.some((o) => o.title === gem.title && haversineKm(o, gem) < 1)) continue;
+        let best = null; let bestD = 0.25; // fotka do 250 m od místa
+        for (const p of photos) { const d = haversineKm(gem, p); if (d <= bestD) { best = p; bestD = d; } }
+        const { famous, ...rest } = gem;
+        out.push({ ...rest, thumb: gem.image ? null : best?.thumb || null, image: gem.image || best?.thumb?.replace(/\/480px-/, '/960px-') || null, photoPage: best?.page || null });
+      }
+      return out.sort((a, b) => (a.thumb || a.image ? 0 : 1) - (b.thumb || b.image ? 0 : 1)).slice(0, 60);
+    });
+  };
+}
+
+// ---------- Trendy ze sociálních sítí (Reddit – veřejné vyhledávání) ----------
+// Co lidé v posledním roce sdílí jako „hidden gem“ / tip v okolí. Název oblasti zjistíme z Photonu.
+export function createTrending({ cached }) {
+  async function areaName(lat, lng) {
+    const la = lat.toFixed(1); const ln = lng.toFixed(1);
+    return cached(`area:${la},${ln}`, 30 * DAY, async () => {
+      const res = await getJson(`https://photon.komoot.io/reverse?lat=${la}&lon=${ln}&lang=en`, { headers: UA, timeoutMs: 8000 });
+      const p = res.features?.[0]?.properties || {};
+      return { city: p.city || p.town || p.village || p.county || p.name || '', region: p.state || '', country: p.country || '' };
+    });
+  }
+  return async function trending({ lat, lng, q }) {
+    let place = String(q || '').trim();
+    let area = null;
+    if (!place) { area = await areaName(lat, lng); place = area.city || area.region || area.country; }
+    if (!place) return { place: '', posts: [] };
+    const posts = await cached(`reddit:${place.toLowerCase()}`, DAY, async () => {
+      const res = await getJson(`https://www.reddit.com/search.json?${new URLSearchParams({
+        q: `"${place}" (hidden gem OR hidden gems OR underrated OR "must see" OR secret spot)`, sort: 'top', t: 'year', limit: '25', type: 'link',
+      })}`, { headers: { 'User-Agent': 'web:tripfinder:0.1 (by /u/tripfinder-app)' }, timeoutMs: 10000 });
+      return (res.data?.children || []).map((c) => c.data).filter((d) => !d.over_18).map((d) => ({
+        title: d.title, url: `https://www.reddit.com${d.permalink}`, sub: d.subreddit_name_prefixed, score: d.score, comments: d.num_comments,
+        created: new Date(d.created_utc * 1000).toISOString().slice(0, 10),
+        thumb: d.preview?.images?.[0]?.resolutions?.find((x) => x.width >= 216)?.url?.replaceAll('&amp;', '&') || (/^https:/.test(d.thumbnail || '') ? d.thumbnail : null),
+      })).slice(0, 12);
+    });
+    return { place, posts, source: 'Reddit' };
+  };
+}

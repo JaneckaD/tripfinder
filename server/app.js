@@ -7,10 +7,13 @@ import { CONTINENTS, TAGS, searchDestinations } from './data/destinations.js';
 import { LIVE_META } from './data/live-meta.js';
 import { countryInfo, geoId, makePlaceSearch, placeDestination, resolveDestination, resolveOrigin } from './geo.js';
 import { createDeals } from './deals.js';
-import { createDirections, createExplore } from './explore.js';
+import { createDirections, createExplore, createGems, createTrending } from './explore.js';
 import { makeCache } from './providers/live/common.js';
 import { createProviders } from './providers/index.js';
 import { createExtras } from './extras.js';
+import { profileOf, socialRouter } from './social.js';
+import compression from 'compression';
+import { countries } from 'countries-list';
 
 const PUBLIC_DIR = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'public');
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -23,12 +26,15 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
   const deals = createDeals({ env, cached });
   const explore = createExplore({ cached });
   const directions = createDirections({ cached });
+  const gems = createGems({ cached });
+  const trending = createTrending({ cached });
   const point = (v) => {
     const [lat, lng] = String(v || '').split(',').map(Number);
     return Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null;
   };
   const app = express();
   app.disable('x-powered-by');
+  app.use(compression());
   app.use(express.json({ limit: '200kb' }));
   app.use(loadUser(db));
 
@@ -65,7 +71,15 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
     res.json({ ok: true });
   });
 
-  api.get('/auth/me', (req, res) => res.json({ user: req.user }));
+  api.get('/auth/me', async (req, res) => {
+    if (!req.user) return res.json({ user: null });
+    res.json({ user: req.user, profile: profileOf(await db.get('SELECT * FROM users WHERE id = ?', req.user.id)) });
+  });
+  api.use(socialRouter(db));
+  // Seznam zemí pro profil (česky, s vlajkou)
+  const COUNTRY_LIST = Object.entries(countries).map(([cc, c]) => ({ cc, name: countryInfo(cc).name || c.name, langs: c.languages || [] }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'cs'));
+  api.get('/countries', (_req, res) => { res.setHeader('Cache-Control', 'public, max-age=86400'); res.json({ countries: COUNTRY_LIST }); });
 
   // ---------- Vyhledávání ----------
   api.get('/meta', async (_req, res) => res.json({ continents: CONTINENTS, tags: TAGS, providers: providers.list(), serpapi: await providers.serpapiUsage() }));
@@ -78,7 +92,7 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
   api.get('/destinations/:id', (req, res) => {
     const dest = resolveDestination(req.params.id);
     if (!dest) return bad(res, 'Destinace nenalezena.', 404);
-    res.json({ destination: dest, continentName: CONTINENTS[dest.continent], tagNames: dest.tags.map((t) => TAGS[t]) });
+    res.json({ destination: dest, langCodes: countries[dest.cc]?.languages || [], continentName: CONTINENTS[dest.continent], tagNames: dest.tags.map((t) => TAGS[t]) });
   });
 
   // Našeptávač míst po celém světě (města, adresy, památky)
@@ -92,6 +106,18 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
     const p = point(`${req.query.lat},${req.query.lng}`);
     if (!p) return bad(res, 'Chybí souřadnice.');
     try { res.json({ places: await explore.nearby(p.lat, p.lng, Number(req.query.radius) || 10000) }); } catch { bad(res, 'Místa v okolí teď nejdou načíst.', 502); }
+  });
+  // Hidden gems: méně známá místa z OpenStreetMap s fotkami z Wikimedia Commons
+  api.get('/explore/gems', async (req, res) => {
+    const p = point(`${req.query.lat},${req.query.lng}`);
+    if (!p) return bad(res, 'Chybí souřadnice.');
+    try { res.json({ places: await gems(p.lat, p.lng, Number(req.query.radius) || 8000) }); } catch { bad(res, 'Hidden gems teď nejdou načíst.', 502); }
+  });
+  // Co je teď trendy na sociálních sítích (Reddit) v okolí nebo u místa
+  api.get('/explore/trending', async (req, res) => {
+    const p = point(`${req.query.lat},${req.query.lng}`);
+    if (!p && !req.query.q) return bad(res, 'Chybí místo.');
+    try { res.json(await trending({ ...(p || {}), q: String(req.query.q || '').slice(0, 80) })); } catch { res.json({ place: String(req.query.q || ''), posts: [], unavailable: true }); }
   });
   api.get('/explore/place', async (req, res) => {
     if (!req.query.title) return bad(res, 'Chybí název místa.');

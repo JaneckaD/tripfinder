@@ -19,7 +19,7 @@
 // Když pro daný druh (doprava / ubytování) běží aspoň jeden skutečný poskytovatel,
 // ukázkové nabídky toho druhu se skryjí a místo nich se zobrazí jen odkazy
 // „porovnat i na Skyscanneru, Omiu…“. PROVIDERS=id1,id2 omezí, kdo je zapnutý.
-import { mockTransportProviders, mockLodgingProviders } from './mock.js';
+import { mockTransportProviders, mockLodgingProviders, flightSearchLinks } from './mock.js';
 import { makeCache, makeQuota } from './live/common.js';
 import { travelpayoutsProvider, serpFlightsProvider } from './live/flights.js';
 import { serpAirbnbProvider } from './live/airbnb.js';
@@ -101,6 +101,8 @@ export function createProviders(db, env = process.env) {
           offers[kind].push(...fallback.flat());
         }
       }
+      // Každý let dostane odkazy na stejné hledání (odkud, kam, datum) i u dalších prodejců.
+      for (const o of offers.transport) if (!o.searchLinks && !o.own && o.mode === 'flight') o.searchLinks = flightSearchLinks(ctx);
       offers.transport.sort((a, b) => a.price - b.price);
       offers.lodging.sort((a, b) => a.price - b.price);
 

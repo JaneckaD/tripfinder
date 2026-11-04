@@ -255,6 +255,27 @@ function arc(a, b) {
   });
 }
 
+// Podkladové mapy bez API klíče. CARTO na veřejných doménách začalo vracet dlaždice „API key required“,
+// proto OpenStreetMap; když dlaždice opakovaně selžou, přepne se na Esri. withLayers přidá přepínač
+// Mapa / Turistická / Satelit.
+const OSM_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
+export function baseTiles(L, map, { withLayers = false, extraAttr = '' } = {}) {
+  const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: OSM_ATTR + extraAttr, crossOrigin: true });
+  const esri = () => L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: `Tiles &copy; Esri${extraAttr}` });
+  let fails = 0; let swapped = false;
+  osm.on('tileerror', () => {
+    if (swapped || ++fails < 4) return;
+    swapped = true; map.removeLayer(osm); esri().addTo(map);
+  });
+  osm.addTo(map);
+  if (withLayers) {
+    const topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { subdomains: 'abc', maxZoom: 17, attribution: `${OSM_ATTR}, &copy; <a href="https://opentopomap.org">OpenTopoMap</a>${extraAttr}` });
+    const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: `&copy; Esri, Maxar${extraAttr}` });
+    L.control.layers({ '🗺️ Mapa': osm, '⛰️ Turistická': topo, '🛰️ Satelit': sat }, null, { position: 'bottomleft' }).addTo(map);
+  }
+  return osm;
+}
+
 // points: [{lat, lng, label, sub, num, color, kind:'stop'|'stay'|'origin'}]
 // segments: [{from:[lat,lng], to:[lat,lng], mode, label}]
 export async function drawMap(el, { points = [], segments = [], legend = true } = {}) {
@@ -264,10 +285,7 @@ export async function drawMap(el, { points = [], segments = [], legend = true } 
   if (el._map) { el._map.remove(); }
   const map = L.map(el, { scrollWheelZoom: false, zoomControl: true, attributionControl: true, worldCopyJump: true });
   el._map = map;
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-    subdomains: 'abcd', maxZoom: 19,
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
-  }).addTo(map);
+  baseTiles(L, map);
   const bounds = [];
   for (const s of segments) {
     if (!s.from || !s.to) continue;

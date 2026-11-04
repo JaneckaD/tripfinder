@@ -128,7 +128,7 @@ function flightOffers(provider, ctx, { count, priceFactor }) {
       currency: 'CZK', rating: null,
       details: [`${legs[0].depart.slice(11)} → ${legs.at(-1).arrive.slice(11)}`, `~${fmtMin(durationMin)}`, rnd() < 0.5 ? 'Zavazadlo 23 kg v ceně' : 'Jen příruční zavazadlo'],
       legs, returnLegs, durationMin, changes,
-      deepLink: provider.link(ctx), mock: true,
+      deepLink: provider.link(ctx), searchLinks: flightSearchLinks(ctx), mock: true,
     };
   });
 }
@@ -153,6 +153,31 @@ function groundJourneys(rnd, ctx, from, to, date) {
   return out;
 }
 
+// Odkazy rovnou na vyhledaný spoj (odkud, kam, datum a čas), ne jen na úvodní stránku dopravce.
+const dmy = (iso) => { const [y, m, d] = iso.slice(0, 10).split('-'); return `${Number(d)}.${Number(m)}.${y}`; };
+export function groundSearchLinks(type, from, to, depart, persons = 1) {
+  const date = depart.slice(0, 10); const hhmm = depart.slice(11, 16) || '08:00';
+  const idosKind = type === 'train' ? 'vlaky' : type === 'bus' ? 'autobusy' : 'vlakyautobusy';
+  const idos = `https://idos.cz/${idosKind}/spojeni/vysledky/?${new URLSearchParams({ f: from.name, t: to.name, date: dmy(date), time: hhmm })}`;
+  const db = `https://int.bahn.de/cs/buchung/fahrplan/suche#${new URLSearchParams({ sts: 'true', so: from.name, zo: to.name, hd: `${date}T${hhmm}:00`, hza: 'D', r: `13:16:KLASSENLOS:${persons}` })}`;
+  const gmaps = `https://www.google.com/maps/dir/?${new URLSearchParams({ api: '1', origin: `${from.lat},${from.lng}`, destination: `${to.lat},${to.lng}`, travelmode: 'transit' })}`;
+  const r2r = `https://www.rome2rio.com/map/${encodeURIComponent(from.name)}/${encodeURIComponent(to.name)}`;
+  const czech = from.cc === 'CZ' || to.cc === 'CZ' || from.cc === 'SK' || to.cc === 'SK';
+  const links = [];
+  if (czech) links.push({ name: `IDOS – ${type === 'train' ? 'vlaky' : type === 'bus' ? 'autobusy' : 'vlaky a autobusy'}`, url: idos });
+  if (type !== 'bus') links.push({ name: 'Deutsche Bahn (vlaky po Evropě)', url: db });
+  links.push({ name: 'Google Maps – veřejná doprava', url: gmaps }, { name: 'Rome2Rio – všechny možnosti', url: r2r });
+  return links;
+}
+export function flightSearchLinks(c) {
+  const ret = c.oneWay ? '' : c.to;
+  return [
+    { name: 'Google Flights', url: `https://www.google.com/travel/flights?q=${enc(`Flights from ${c.origin} to ${c.dest.airport} on ${c.from}${ret ? ` through ${ret}` : ' one way'}`)}&curr=CZK&hl=cs` },
+    { name: 'Skyscanner', url: `https://www.skyscanner.cz/transport/lety/${c.origin.toLowerCase()}/${c.dest.airport.toLowerCase()}/${yymmdd(c.from)}/${ret ? `${yymmdd(ret)}/` : ''}?adultsv2=${c.persons}&currency=CZK` },
+    { name: 'Kiwi.com', url: `https://www.kiwi.com/deep?from=${c.origin}&to=${c.dest.airport}&departure=${c.from}${ret ? `&return=${ret}` : ''}&adults=${c.persons}&currency=czk&lang=cs` },
+  ];
+}
+
 function groundOffers(provider, ctx) {
   const { dest, persons } = ctx;
   if (!provider.applies(ctx)) return [];
@@ -173,7 +198,8 @@ function groundOffers(provider, ctx) {
       currency: 'CZK', rating: null,
       details: [`${j.legs[0].depart.slice(11)} → ${j.legs.at(-1).arrive.slice(11)}`, `~${fmtMin(durationMin)}`, j.type === 'bus' ? 'Wi‑Fi, zásuvky' : 'Jídelní vůz, Wi‑Fi'],
       legs: j.legs, returnLegs: back.find((b) => b.type === j.type)?.legs || back[0]?.legs || null, durationMin, changes,
-      deepLink: provider.link(ctx), mock: true,
+      ...(() => { const links = groundSearchLinks(j.type, { ...from, cc: from.cc || ctx.originCc || '' }, { ...to, cc: dest.cc || '' }, j.legs[0].depart, persons); return { deepLink: links[0].url, searchLinks: links }; })(),
+      mock: true,
     };
   });
 }
@@ -293,10 +319,10 @@ export const mockTransportProviders = [
     search(ctx) { return Promise.resolve(flightOffers(this, ctx, { count: 2, priceFactor: 1.05 })); },
   },
   {
-    id: 'flixbus', name: 'Vlaky a autobusy', linkName: 'Vlaky a autobusy (Omio)', kind: 'transport', website: 'https://www.omio.cz', mode: 'mock',
+    id: 'flixbus', name: 'Vlaky a autobusy', linkName: 'Vlaky a autobusy (IDOS / Rome2Rio)', kind: 'transport', website: 'https://idos.cz', mode: 'mock',
     offers: 'Vlaky a autobusy včetně přestupů (Evropa a kratší vzdálenosti)',
     applies: (c) => c.distanceKm <= 1700 && (c.dest.continent === 'europe' ? c.originContinent === 'europe' : c.distanceKm <= 900),
-    link: () => 'https://www.omio.cz/',
+    link: (c) => groundSearchLinks('combo', { ...c.originPlace, cc: c.originPlace.cc || '' }, { ...c.dest, cc: c.dest.cc || '' }, `${c.from}T08:00`, c.persons)[0].url,
     search(ctx) { return Promise.resolve(groundOffers(this, ctx)); },
   },
   {
