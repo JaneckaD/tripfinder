@@ -45,10 +45,14 @@ Proměnné prostředí:
 - **Libovolné místo na světě** – našeptávač Odkud/Kam hledá města, adresy i památky přes [Photon](https://photon.komoot.io) (OpenStreetMap, bez klíče) a ke každému místu dohledá nejbližší letiště (databáze OurAirports v `server/data/airports.json`).
 - **Spoje s přestupy** – let s přestupem, doprava na letiště a z letiště, přímý vlak/autobus i kombinace vlak + autobus. Každý spoj i ubytování jde rozkliknout do detailu (jízdní řád po úsecích, mapa, fotky).
 - **Okružní cesta** – více měst a zemí za sebou, noci v každé zastávce, doprava mezi nimi a ubytování, mapa trasy a uložení jako výlet.
-- **Mapa** – Leaflet + dlaždice CARTO Voyager; lety oranžovo-červeně obloukem, vlaky modře, autobusy zeleně.
+- **Mapa** – Leaflet + dlaždice OpenStreetMap (bez API klíče, záloha Esri; v Prozkoumat i turistická OpenTopoMap a satelit); lety oranžovo-červeně obloukem, vlaky modře, autobusy zeleně.
 - **Akce na půl roku** – nejlevnější letenky (Travelpayouts `prices/latest`, bez klíče ukázkové ceny) a zvýhodněné ubytování po měsících.
 - **Prozkoumat** – mapa s piny s fotkami zajímavých míst v okolí (příroda, památky, kultura) z Wikipedie, detail místa a navigace k němu.
 - **Pěšky a autem** – trasy po cestách a silnicích z OpenStreetMap ([OSRM na routing.openstreetmap.de](https://routing.openstreetmap.de)) s pokyny po krocích a odkazem do Google Maps.
+- **Hidden gems a trendy** – méně známá místa z OpenStreetMap (vyhlídky, vodopády, jeskyně, zříceniny… bez článku na Wikipedii) s fotkami z Wikimedia Commons a co se v okolí sdílí na Redditu jako „hidden gem“.
+- **Profil cestovatele** – po registraci krátký dotazník: země, domovské město (výchozí místo odjezdu), pas, datum narození (slevy pro mladé a seniory), jazyky. U destinace pak víza a jazyk, u vlaků a autobusů sleva podle věku.
+- **Přátelé a chat** – žádost o přátelství podle e-mailu nebo pozvánka odkazem, druhá strana musí přijmout; pak chat (ikona v hlavičce s počtem nepřečtených).
+- **Odkazy na konkrétní spoj** – vlaky a autobusy vedou do IDOS / Deutsche Bahn / Google Maps / Rome2Rio s vyplněným odkud, kam, datem a časem; lety do Google Flights, Skyscanneru a Kiwi s daty.
 - **Ubytování jen z Airbnb** – se `SERPAPI_KEY` skutečné inzeráty (SerpApi `engine=airbnb`) s fotkami a přímým odkazem na inzerát, bez klíče ukázka s odkazem na hledání Airbnb ve stejném místě a termínu.
 - **Cestovatelský pas** – dokončený výlet přidá do profilu razítko každé navštívené země (Francie má croissant, Itálie pizzu…).
 - **Účty** – registrace a přihlášení (hesla hashovaná scryptem, session v HttpOnly cookie).
