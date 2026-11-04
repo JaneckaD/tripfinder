@@ -274,18 +274,20 @@ async function loadOffers(d) {
   el.innerHTML = `<div class="offers">${'<div class="skeleton"></div>'.repeat(4)}</div>`;
   const data = await api(`/destinations/${d.id}/offers?${new URLSearchParams({ from: s.from, to: s.to, persons: s.persons, origin: s.origin })}`);
   const { transport, lodging } = data.offers;
+  const links = data.links || { transport: [], lodging: [] };
   const cheapestT = transport[0]?.price || 0;
   const cheapestL = lodging[0]?.price || 0;
   const anyMock = [...transport, ...lodging].some((o) => o.mock);
   el.innerHTML = `
-    ${anyMock ? `<div class="notice">ℹ️ Ceny jsou zatím <b>ukázkové</b> – skutečné vyhledávače připojíme, až je schválíš. Odkazy „Otevřít“ už vedou na opravdové hledání u poskytovatele.</div>` : ''}
+    ${anyMock ? `<div class="notice">ℹ️ Některé ceny jsou <b>ukázkové</b>, protože pro ně ještě nejsou vložené API klíče. Odkazy „Otevřít“ už vedou na opravdové hledání u poskytovatele.</div>` : ''}
     <div class="card panel">
       <div class="small muted">Nejlevnější kombinace pro ${data.context.persons} os. · ${data.context.nights} nocí · ${fmtDate(data.context.from)} – ${fmtDate(data.context.to)}</div>
       <div class="price" style="font-size:1.5rem">${czk(cheapestT + cheapestL + d.dailyCost * data.context.persons * data.context.nights)}</div>
       <div class="small muted">doprava ${czk(cheapestT)} + ubytování ${czk(cheapestL)} + útrata na místě ~${czk(d.dailyCost * data.context.persons * data.context.nights)}</div>
     </div>
-    ${offerSection('Doprava', '✈️', transport, 'transport')}
-    ${offerSection('Ubytování', '🏨', lodging, 'lodging')}`;
+    ${data.errors?.length ? `<div class="notice">⚠️ Některé vyhledávače teď neodpověděly: ${data.errors.map((e) => esc(e.providerName)).join(', ')}.</div>` : ''}
+    ${offerSection('Doprava', '✈️', transport, 'transport', links.transport)}
+    ${offerSection('Ubytování', '🏨', lodging, 'lodging', links.lodging)}`;
 
   el.querySelectorAll('[data-filter]').forEach((b) => b.addEventListener('click', () => {
     const sec = b.closest('section');
@@ -299,7 +301,7 @@ async function loadOffers(d) {
   }));
 }
 
-function offerSection(title, icon, offers, kind) {
+function offerSection(title, icon, offers, kind, links = []) {
   const providers = [...new Map(offers.map((o) => [o.providerId, o.providerName])).entries()];
   return `<section>
     <h2 class="section-title">${icon} ${title} <span class="count">${offers.length} nabídek od ${providers.length} poskytovatelů</span></h2>
@@ -322,7 +324,9 @@ function offerSection(title, icon, offers, kind) {
           </div>
         </div>
       </article>`).join('') : `<p class="muted">Pro tuto destinaci tu zatím nic nemáme.</p>`}
-    </div></section>`;
+    </div>
+    ${links.length ? `<div class="compare-links"><span class="small muted">Porovnat i na:</span>${links.map((l) => `<a class="chip" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.name)} ↗</a>`).join('')}</div>` : ''}
+    </section>`;
 }
 
 // Uložení položky do výletu (výběr existujícího nebo založení nového).

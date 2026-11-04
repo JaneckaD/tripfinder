@@ -1,0 +1,45 @@
+// Doplňující údaje pro skutečná API:
+//   cc        – ISO kód země (LiteAPI)
+//   city      – anglický název města pro hledání hotelů (LiteAPI, Google Hotels)
+//   cityCode  – IATA kód města pro Travelpayouts (když se liší od letiště)
+export const LIVE_META = {
+  barcelona: { cc: 'ES', city: 'Barcelona' },
+  rome: { cc: 'IT', city: 'Rome', cityCode: 'ROM' },
+  paris: { cc: 'FR', city: 'Paris', cityCode: 'PAR' },
+  lisbon: { cc: 'PT', city: 'Lisbon' },
+  dolomites: { cc: 'IT', city: "Cortina d'Ampezzo" },
+  crete: { cc: 'GR', city: 'Heraklion' },
+  iceland: { cc: 'IS', city: 'Reykjavik', cityCode: 'REK' },
+  dubrovnik: { cc: 'HR', city: 'Dubrovnik' },
+  amsterdam: { cc: 'NL', city: 'Amsterdam' },
+  'alps-austria': { cc: 'AT', city: 'Innsbruck' },
+  'norway-fjords': { cc: 'NO', city: 'Bergen' },
+  tokyo: { cc: 'JP', city: 'Tokyo', cityCode: 'TYO' },
+  bali: { cc: 'ID', city: 'Ubud' },
+  bangkok: { cc: 'TH', city: 'Bangkok' },
+  phuket: { cc: 'TH', city: 'Phuket' },
+  vietnam: { cc: 'VN', city: 'Hanoi' },
+  dubai: { cc: 'AE', city: 'Dubai' },
+  maldives: { cc: 'MV', city: 'Male' },
+  nepal: { cc: 'NP', city: 'Kathmandu' },
+  'sri-lanka': { cc: 'LK', city: 'Colombo' },
+  marrakech: { cc: 'MA', city: 'Marrakech' },
+  'cape-town': { cc: 'ZA', city: 'Cape Town' },
+  zanzibar: { cc: 'TZ', city: 'Zanzibar' },
+  'kenya-safari': { cc: 'KE', city: 'Nairobi' },
+  egypt: { cc: 'EG', city: 'Hurghada' },
+  'new-york': { cc: 'US', city: 'New York', cityCode: 'NYC' },
+  california: { cc: 'US', city: 'Los Angeles' },
+  'canada-rockies': { cc: 'CA', city: 'Banff' },
+  mexico: { cc: 'MX', city: 'Cancun' },
+  cuba: { cc: 'CU', city: 'Havana' },
+  peru: { cc: 'PE', city: 'Cusco' },
+  rio: { cc: 'BR', city: 'Rio de Janeiro', cityCode: 'RIO' },
+  patagonia: { cc: 'AR', city: 'El Calafate' },
+  galapagos: { cc: 'EC', city: 'Puerto Ayora' },
+  sydney: { cc: 'AU', city: 'Sydney' },
+  'new-zealand': { cc: 'NZ', city: 'Queenstown' },
+  fiji: { cc: 'FJ', city: 'Nadi' },
+};
+
+export const liveMeta = (dest) => ({ cityCode: dest.airport, ...(LIVE_META[dest.id] || { cc: '', city: dest.name }) });
