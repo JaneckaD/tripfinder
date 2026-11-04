@@ -3,7 +3,11 @@ import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { COOKIE, createSession, hashPassword, loadUser, requireUser, sessionCookie, verifyPassword } from './auth.js';
-import { CONTINENTS, TAGS, findDestination, searchDestinations } from './data/destinations.js';
+import { CONTINENTS, TAGS, searchDestinations } from './data/destinations.js';
+import { LIVE_META } from './data/live-meta.js';
+import { countryInfo, geoId, makePlaceSearch, placeDestination, resolveDestination, resolveOrigin } from './geo.js';
+import { createDeals } from './deals.js';
+import { makeCache } from './providers/live/common.js';
 import { createProviders } from './providers/index.js';
 import { createExtras } from './extras.js';
 
@@ -13,6 +17,9 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export function createApp(db, { secureCookies = process.env.NODE_ENV === 'production', env = process.env } = {}) {
   const providers = createProviders(db, env);
   const extras = createExtras(db);
+  const cached = makeCache(db);
+  const searchPlaces = makePlaceSearch(cached);
+  const deals = createDeals({ env, cached });
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '200kb' }));
@@ -58,18 +65,90 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
 
   api.get('/destinations', (req, res) => {
     const { continent, q, tags, maxBudget, persons, nights, month, sort } = req.query;
-    res.json({ results: searchDestinations({ continent, q, tags, maxBudget, persons, nights, month, sort }) });
+    res.json({ results: searchDestinations({ continent, q, tags, maxBudget, persons, nights, month, sort }).map((d) => ({ ...d, cc: LIVE_META[d.id]?.cc || '' })) });
   });
 
   api.get('/destinations/:id', (req, res) => {
-    const dest = findDestination(req.params.id);
+    const dest = resolveDestination(req.params.id);
     if (!dest) return bad(res, 'Destinace nenalezena.', 404);
     res.json({ destination: dest, continentName: CONTINENTS[dest.continent], tagNames: dest.tags.map((t) => TAGS[t]) });
   });
 
+  // Našeptávač míst po celém světě (města, adresy, památky)
+  api.get('/places', async (req, res) => {
+    const q = String(req.query.q || '').slice(0, 120);
+    res.json({ results: await searchPlaces(q, { limit: Math.min(10, Number(req.query.limit) || 8) }) });
+  });
+
+  // Akční letenky a ubytování na 6 měsíců dopředu
+  api.get('/deals', async (req, res) => res.json(await deals(req.query.origin)));
+
+  // Okružní cesta přes více měst: doprava mezi zastávkami + ubytování v každé z nich
+  api.post('/route-plan', async (req, res) => {
+    const { origin = 'PRG', start, persons = 2, stops = [], returnHome = true } = req.body || {};
+    if (!Array.isArray(stops) || !stops.length) return bad(res, 'Přidej aspoň jednu zastávku.');
+    if (stops.length > 8) return bad(res, 'Okružní cesta může mít nejvýš 8 zastávek.');
+    const o = resolveOrigin(origin);
+    const home = resolveDestination(o.id) || placeDestination(geoId(o));
+    const places = stops.map((s) => ({ dest: resolveDestination(s.id), nights: Math.min(30, Math.max(1, Number(s.nights) || 2)) }));
+    if (places.some((p) => !p.dest)) return bad(res, 'Některou zastávku se nepodařilo najít.');
+    const day0 = start && !Number.isNaN(Date.parse(start)) ? new Date(start) : new Date(Date.now() + 30 * 86400000);
+    const iso = (d) => d.toISOString().slice(0, 10);
+    const addDays = (d, n) => new Date(d.getTime() + n * 86400000);
+    const pt = (d) => ({ id: d.id, name: d.name, country: d.country, cc: d.cc, lat: d.lat, lng: d.lng, emoji: d.emoji });
+
+    let day = day0;
+    let prev = { id: o.id, point: { name: o.name, lat: o.lat, lng: o.lng, cc: o.cc } };
+    const legJobs = []; const stayJobs = [];
+    for (const p of places) {
+      legJobs.push({ from: prev, to: p.dest, date: iso(day) });
+      stayJobs.push({ dest: p.dest, from: iso(day), to: iso(addDays(day, p.nights)), nights: p.nights });
+      day = addDays(day, p.nights);
+      prev = { id: p.dest.id, point: pt(p.dest) };
+    }
+    if (returnHome) legJobs.push({ from: prev, to: home, date: iso(day) });
+
+    const top = (list, n = 4) => {
+      const cheapest = [...list].sort((a, b) => a.price - b.price);
+      const fastest = [...list].filter((x) => x.durationMin).sort((a, b) => a.durationMin - b.durationMin);
+      const out = [];
+      for (const x of [cheapest[0], fastest[0], ...cheapest]) if (x && !out.includes(x) && out.length < n) out.push(x);
+      return out;
+    };
+    const [legs, stays] = await Promise.all([
+      Promise.all(legJobs.map(async (j) => {
+        const r = await providers.search(j.to, { origin: j.from.id, from: j.date, to: iso(addDays(new Date(j.date), 1)), persons, oneWay: true }, { kinds: ['transport'], skip: ['google-flights'] });
+        return { from: j.from.point, to: pt(j.to), date: j.date, distanceKm: r.context.distanceKm, options: top(r.offers.transport), links: r.links.transport };
+      })),
+      Promise.all(stayJobs.map(async (j) => {
+        const r = await providers.search(j.dest, { origin: o.id, from: j.from, to: j.to, persons }, { kinds: ['lodging'], skip: ['google-hotels'] });
+        return { place: pt(j.dest), from: j.from, to: j.to, nights: j.nights, options: top(r.offers.lodging), links: r.links.lodging };
+      })),
+    ]);
+    res.json({ origin: { id: o.id, code: o.code, name: o.name, lat: o.lat, lng: o.lng }, start: iso(day0), end: iso(day), persons: Number(persons) || 2, returnHome: Boolean(returnHome), legs, stays });
+  });
+
+  // Cestovatelský pas: země z dokončených výletů
+  api.get('/me/stamps', requireUser, async (req, res) => {
+    const rows = await db.all(`
+      SELECT t.id AS trip_id, t.title, t.end_date, t.completed_at, i.data FROM trips t
+      JOIN trip_items i ON i.trip_id = t.id AND i.kind = 'destination'
+      LEFT JOIN trip_members m ON m.trip_id = t.id AND m.user_id = ?
+      WHERE t.status = 'done' AND (t.owner_id = ? OR m.user_id = ?)
+      ORDER BY COALESCE(t.end_date, t.completed_at)`, req.user.id, req.user.id, req.user.id);
+    const stamps = new Map();
+    for (const r of rows) {
+      const data = JSON.parse(r.data);
+      const cc = (data.cc || LIVE_META[data.destinationId]?.cc || /^geo:[^,]+,[^,]+,([A-Z]{2}),/.exec(data.destinationId || '')?.[1] || '').toUpperCase();
+      if (!cc || stamps.has(cc)) continue;
+      stamps.set(cc, { cc, country: countryInfo(cc).name, place: data.name, date: r.end_date || (r.completed_at || '').slice(0, 10), tripId: r.trip_id, tripTitle: r.title });
+    }
+    res.json({ stamps: [...stamps.values()] });
+  });
+
   // Fotka destinace (přesměrování na obrázek z Wikimedia Commons)
   api.get('/destinations/:id/photo', async (req, res) => {
-    const dest = findDestination(req.params.id);
+    const dest = resolveDestination(req.params.id);
     if (!dest) return bad(res, 'Destinace nenalezena.', 404);
     const photo = await extras.photo(dest).catch(() => null);
     if (!photo) return bad(res, 'Fotka není k dispozici.', 404);
@@ -78,17 +157,17 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
   });
 
   api.get('/destinations/:id/weather', async (req, res) => {
-    const dest = findDestination(req.params.id);
+    const dest = resolveDestination(req.params.id);
     if (!dest) return bad(res, 'Destinace nenalezena.', 404);
     try { res.json(await extras.weather(dest)); } catch { bad(res, 'Počasí teď není k dispozici.', 502); }
   });
 
   api.get('/destinations/:id/offers', async (req, res) => {
-    const dest = findDestination(req.params.id);
+    const dest = resolveDestination(req.params.id);
     if (!dest) return bad(res, 'Destinace nenalezena.', 404);
-    const { from, to, persons, origin } = req.query;
+    const { from, to, persons, origin, oneWay } = req.query;
     if (from && to && new Date(to) <= new Date(from)) return bad(res, 'Datum návratu musí být po datu odjezdu.');
-    res.json(await providers.search(dest, { from, to, persons, origin }));
+    res.json(await providers.search(dest, { from, to, persons, origin, oneWay }));
   });
 
   // ---------- Výlety ----------
@@ -136,10 +215,19 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
   });
 
   api.post('/trips', requireUser, async (req, res) => {
-    const { title, note = '', start_date = null, end_date = null, persons = 2, budget = null } = req.body || {};
+    const { title, note = '', start_date = null, end_date = null, persons = 2, budget = null, items = [] } = req.body || {};
     if (!title?.trim()) return bad(res, 'Výlet potřebuje název.');
     const { lastInsertRowid } = await db.run('INSERT INTO trips (owner_id, title, note, start_date, end_date, persons, budget) VALUES (?, ?, ?, ?, ?, ?, ?)',
       req.user.id, title.trim().slice(0, 120), String(note).slice(0, 2000), start_date || null, end_date || null, Number(persons) || 2, Number(budget) > 0 ? Number(budget) : null);
+    // Volitelně rovnou s položkami (např. uložená okružní cesta)
+    const valid = (Array.isArray(items) ? items : []).slice(0, 60).filter((it) => ['destination', 'transport', 'lodging', 'note'].includes(it?.kind) && it.data && typeof it.data === 'object');
+    if (valid.length) {
+      await db.batch(valid.map(({ kind, data }) => {
+        const price = Number.isFinite(Number(data.price)) && kind !== 'destination' ? Number(data.price) : null;
+        return ['INSERT INTO trip_items (trip_id, kind, data, price, currency, added_by) VALUES (?, ?, ?, ?, ?, ?)',
+          lastInsertRowid, kind, JSON.stringify(data).slice(0, 20000), price, data.currency || (price != null ? 'CZK' : null), req.user.id];
+      }));
+    }
     const trip = await db.get('SELECT * FROM trips WHERE id = ?', lastInsertRowid);
     res.status(201).json(await tripDetail(trip, 'owner'));
   });
@@ -153,6 +241,13 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
     await db.run(`UPDATE trips SET title = ?, note = ?, start_date = ?, end_date = ?, persons = ?, budget = ?, updated_at = datetime('now') WHERE id = ?`,
       String(t.title).trim().slice(0, 120), String(t.note || '').slice(0, 2000), t.start_date || null, t.end_date || null, Number(t.persons) || 1, budget, t.id);
     res.json(await tripDetail(await db.get('SELECT * FROM trips WHERE id = ?', t.id), req.role));
+  });
+
+  // Dokončit výlet (získáš razítka zemí do pasu) / vrátit mezi plánované
+  api.post('/trips/:id/status', requireUser, withTrip('owner'), async (req, res) => {
+    const done = req.body?.status === 'done';
+    await db.run(`UPDATE trips SET status = ?, completed_at = ${done ? "datetime('now')" : 'NULL'}, updated_at = datetime('now') WHERE id = ?`, done ? 'done' : 'planned', req.trip.id);
+    res.json(await tripDetail(await db.get('SELECT * FROM trips WHERE id = ?', req.trip.id), req.role));
   });
 
   api.delete('/trips/:id', requireUser, withTrip('owner'), async (req, res) => {
@@ -225,6 +320,7 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
   app.use('/api', api);
 
   // ---------- Frontend (PWA) ----------
+  app.use('/vendor/leaflet', express.static(join(PUBLIC_DIR, '..', 'node_modules', 'leaflet', 'dist'), { maxAge: '30d' }));
   app.use(express.static(PUBLIC_DIR, {
     setHeaders(res, path) {
       if (path.endsWith('sw.js')) res.setHeader('Cache-Control', 'no-cache');

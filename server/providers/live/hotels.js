@@ -19,9 +19,12 @@ export function liteApiProvider({ apiKey, cached }) {
     async search(ctx) {
       const { dest, from, to, persons, nights } = ctx;
       const { cc, city } = liveMeta(dest);
-      const hotels = await cached(`lite-hotels:${cc}:${city}`, 7 * 24 * HOUR, async () => {
+      const hotels = await cached(`lite-hotels2:${cc}:${city}`, 7 * 24 * HOUR, async () => {
         const res = await getJson(`${base}/data/hotels?${new URLSearchParams({ countryCode: cc, cityName: city, limit: '40' })}`, { headers });
-        return (res.data || []).map((h) => ({ id: h.id, name: h.name, address: h.address, stars: h.stars, rating: h.rating }));
+        return (res.data || []).map((h) => ({
+          id: h.id, name: h.name, address: h.address, stars: h.stars, rating: h.rating,
+          photo: h.main_photo || h.thumbnail || null, lat: h.latitude, lng: h.longitude, description: String(h.hotelDescription || '').replace(/<[^>]+>/g, '').slice(0, 600),
+        }));
       });
       if (!hotels.length) return [];
       const rates = await cached(`lite-rates:${cc}:${city}:${from}:${to}:${persons}`, 6 * HOUR, async () => {
@@ -52,6 +55,8 @@ export function liteApiProvider({ apiKey, cached }) {
           priceNote: `${round10(total / nights).toLocaleString('cs-CZ')} Kč / noc · ${nightsLabel(nights)}`,
           currency: 'CZK', rating: h.rating ? Math.round(Number(h.rating) * 10) / 10 : null,
           details: [r.room, r.board, r.refundable ? 'Bezplatné storno' : null].filter(Boolean),
+          photos: h.photo ? [h.photo] : [], description: h.description || null,
+          location: Number.isFinite(h.lat) ? { lat: h.lat, lng: h.lng } : null, checkin: from, checkout: to, nights,
           deepLink: `https://www.booking.com/searchresults.cs.html?ss=${encodeURIComponent(`${h.name} ${city}`)}&checkin=${from}&checkout=${to}&group_adults=${persons}`,
           mock: false,
         };
@@ -89,6 +94,10 @@ export function serpHotelsProvider({ apiKey, cached, quota, monthlyLimit }) {
             priceNote: `${round10(total / nights).toLocaleString('cs-CZ')} Kč / noc · ${nightsLabel(nights)}`,
             currency: 'CZK', rating: p.overall_rating ? Math.round(p.overall_rating * 20) / 10 : null,
             details: sellers.length ? sellers : (p.amenities || []).slice(0, 4),
+            amenities: (p.amenities || []).slice(0, 12), description: p.description || null,
+            photos: (p.images || []).map((im) => im.original_image || im.thumbnail).filter(Boolean).slice(0, 8),
+            location: p.gps_coordinates ? { lat: p.gps_coordinates.latitude, lng: p.gps_coordinates.longitude } : null,
+            checkin: from, checkout: to, nights, checkinTime: p.check_in_time || null, checkoutTime: p.check_out_time || null,
             deepLink: p.link || link, mock: false,
           };
         });

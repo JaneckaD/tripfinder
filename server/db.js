@@ -84,7 +84,7 @@ export async function openDb({
   }
   await client.executeMultiple(SCHEMA);
   // Migrace: sloupce přidané později (ALTER selže, když už existují – to je v pořádku).
-  for (const sql of ['ALTER TABLE trips ADD COLUMN budget REAL']) {
+  for (const sql of ['ALTER TABLE trips ADD COLUMN budget REAL', "ALTER TABLE trips ADD COLUMN status TEXT NOT NULL DEFAULT 'planned'", 'ALTER TABLE trips ADD COLUMN completed_at TEXT']) {
     try { await client.execute(sql); } catch { /* sloupec už existuje */ }
   }
 

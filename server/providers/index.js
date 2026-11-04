@@ -24,16 +24,24 @@ import { mockTransportProviders, mockLodgingProviders } from './mock.js';
 import { makeCache, makeQuota } from './live/common.js';
 import { travelpayoutsProvider, serpFlightsProvider } from './live/flights.js';
 import { liteApiProvider, serpHotelsProvider } from './live/hotels.js';
+import { countryInfo, haversineKm, resolveOrigin } from '../geo.js';
 
-export function buildSearchContext(dest, { from, to, persons = 2, origin = 'PRG' } = {}) {
+export function buildSearchContext(dest, { from, to, persons = 2, origin = 'PRG', oneWay = false } = {}) {
   const today = new Date();
   const start = from ? new Date(from) : new Date(today.getFullYear(), today.getMonth() + 1, 1);
   const end = to ? new Date(to) : new Date(start.getTime() + 7 * 86400000);
   const nights = Math.max(1, Math.round((end - start) / 86400000));
   const iso = (dt) => dt.toISOString().slice(0, 10);
+  const o = resolveOrigin(origin);
   return {
     dest,
-    origin: String(origin || 'PRG').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3) || 'PRG',
+    origin: o.code,
+    originId: o.id,
+    originName: o.name,
+    originPlace: { lat: o.lat, lng: o.lng, name: o.name, cc: o.cc || '' },
+    originContinent: countryInfo(o.cc || 'CZ').continent,
+    distanceKm: haversineKm(o, dest),
+    oneWay: Boolean(oneWay) && oneWay !== 'false' && oneWay !== '0',
     from: iso(start),
     to: iso(end),
     nights,
@@ -70,13 +78,16 @@ export function createProviders(db, env = process.env) {
     },
     serpapiUsage: async () => (env.SERPAPI_KEY ? { used: await quota.used('serpapi'), limit: monthlyLimit } : null),
 
-    async search(dest, params) {
+    // opts.kinds = ['transport'] omezí druh, opts.skip = ['google-flights'] vynechá poskytovatele (šetří kvótu)
+    async search(dest, params, opts = {}) {
       const ctx = buildSearchContext(dest, params);
-      const results = await Promise.allSettled(searchers.map((p) => p.search(ctx)));
+      const use = (p) => (!opts.kinds || opts.kinds.includes(p.kind)) && !(opts.skip || []).includes(p.id);
+      const active = searchers.filter(use);
+      const results = await Promise.allSettled(active.map((p) => p.search(ctx)));
       const offers = { transport: [], lodging: [] };
       const errors = [];
       results.forEach((r, i) => {
-        const p = searchers[i];
+        const p = active[i];
         if (r.status === 'fulfilled') offers[p.kind].push(...r.value);
         else {
           console.warn(`[provider ${p.id}]`, r.reason?.message || r.reason);
@@ -85,7 +96,7 @@ export function createProviders(db, env = process.env) {
       });
 
       // Když všichni skuteční poskytovatelé jednoho druhu selžou, ukážeme aspoň ukázková data.
-      for (const kind of ['transport', 'lodging']) {
+      for (const kind of opts.kinds || ['transport', 'lodging']) {
         if (hasLive(kind) && !offers[kind].length) {
           const fallback = await Promise.all(mocks.filter((p) => p.kind === kind).map((p) => p.search(ctx).catch(() => [])));
           offers[kind].push(...fallback.flat());
@@ -97,11 +108,11 @@ export function createProviders(db, env = process.env) {
       // Odkazy na poskytovatele bez API (předvyplněné hledání).
       const links = { transport: [], lodging: [] };
       for (const p of mocks) {
-        if (!hasLive(p.kind) || (p.applies && !p.applies(ctx))) continue;
+        if (!hasLive(p.kind) || (p.applies && !p.applies(ctx)) || (opts.kinds && !opts.kinds.includes(p.kind))) continue;
         links[p.kind].push({ providerId: p.id, name: p.linkName || p.name, url: p.link(ctx) });
       }
 
-      return { context: { ...ctx, dest: undefined, destinationId: dest.id }, offers, links, errors };
+      return { context: { ...ctx, dest: undefined, originPlace: undefined, destinationId: dest.id, destination: { name: dest.name, lat: dest.lat, lng: dest.lng }, originPoint: ctx.originPlace }, offers, links, errors };
     },
   };
 }

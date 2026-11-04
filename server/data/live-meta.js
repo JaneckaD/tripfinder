@@ -1,3 +1,5 @@
+import { MORE } from './destinations-more.js';
+
 // Doplňující údaje pro skutečná API:
 //   cc        – ISO kód země (LiteAPI)
 //   city      – anglický název města pro hledání hotelů (LiteAPI, Google Hotels)
@@ -42,5 +44,6 @@ export const LIVE_META = {
   'new-zealand': { cc: 'NZ', city: 'Queenstown', wiki: 'Milford_Sound' },
   fiji: { cc: 'FJ', city: 'Nadi', wiki: 'Fiji' },
 };
+for (const m of MORE) LIVE_META[m[0]] = { cc: m[14], city: m[15], wiki: decodeURIComponent(m[16]), ...(m[17] ? { cityCode: m[17] } : {}) };
 
-export const liveMeta = (dest) => ({ cityCode: dest.airport, ...(LIVE_META[dest.id] || { cc: '', city: dest.name }) });
+export const liveMeta = (dest) => ({ cityCode: dest.airport, ...(LIVE_META[dest.id] || { cc: dest.cc || '', city: dest.city || dest.name }) });
