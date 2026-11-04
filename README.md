@@ -43,11 +43,11 @@ server/
   data/destinations.js  katalog destinací + odhad ceny
   providers/
     index.js          rozhraní a registr poskytovatelů
-    mock.js           ukázkoví poskytovatelé (Kiwi, Skyscanner, Amadeus, FlixBus, Booking, Airbnb, Expedia, Hostelworld)
+    mock.js           ukázkoví poskytovatelé (zatím ukázková data)
 public/               frontend (vanilla JS, bez build kroku), manifest, service worker, ikony
 test/                 API testy (node:test)
 ```
 
 ## Poskytovatelé (vyhledávače)
 
-Všechny ceny jsou zatím **ukázkové** (`mode: 'mock'`), odkazy „Otevřít“ ale vedou na skutečné hledání u poskytovatele. Návrh, které skutečné služby napojit, je v [docs/poskytovatele.md](docs/poskytovatele.md). Nový poskytovatel = objekt se stejným rozhraním (`id`, `name`, `kind`, `search(ctx)`) přidaný do `server/providers/index.js`.
+Všechny ceny jsou zatím **ukázkové** (`mode: 'mock'`), odkazy „Otevřít“ ale vedou na skutečné hledání u poskytovatele. Přehled, které skutečné služby jde zdarma napojit, je v [docs/poskytovatele.md](docs/poskytovatele.md). Nový poskytovatel = objekt se stejným rozhraním (`id`, `name`, `kind`, `search(ctx)`) přidaný do `server/providers/index.js`.
