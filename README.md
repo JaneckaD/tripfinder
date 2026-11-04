@@ -43,6 +43,12 @@ Proměnné prostředí:
 
 - **Hledání** – celý svět nebo kontinent, typ výletu (moře, hory, města, příroda…), rozpočet na osobu, nejlepší sezóna, místo odletu, počet osob, termín, řazení.
 - **Detail destinace** – info (měna, jazyk, letiště, sezóna, denní útrata) a pod tím nabídky **dopravy** a **ubytování** od více poskytovatelů seřazené podle ceny, filtrovatelné podle poskytovatele, s odkazem na skutečné vyhledávání u poskytovatele.
+- **Libovolné místo na světě** – našeptávač Odkud/Kam hledá města, adresy i památky přes [Photon](https://photon.komoot.io) (OpenStreetMap, bez klíče) a ke každému místu dohledá nejbližší letiště (databáze OurAirports v `server/data/airports.json`).
+- **Spoje s přestupy** – let s přestupem, doprava na letiště a z letiště, přímý vlak/autobus i kombinace vlak + autobus. Každý spoj i ubytování jde rozkliknout do detailu (jízdní řád po úsecích, mapa, fotky).
+- **Okružní cesta** – více měst a zemí za sebou, noci v každé zastávce, doprava mezi nimi a ubytování, mapa trasy a uložení jako výlet.
+- **Mapa** – Leaflet + dlaždice CARTO Voyager; lety oranžovo-červeně obloukem, vlaky modře, autobusy zeleně.
+- **Akce na půl roku** – nejlevnější letenky (Travelpayouts `prices/latest`, bez klíče ukázkové ceny) a zvýhodněné ubytování po měsících.
+- **Cestovatelský pas** – dokončený výlet přidá do profilu razítko každé navštívené země (Francie má croissant, Itálie pizzu…).
 - **Účty** – registrace a přihlášení (hesla hashovaná scryptem, session v HttpOnly cookie).
 - **Výlety** – libovolný počet, ukládání destinací, dopravy, ubytování a poznámek s cenou, součet rozpočtu a cena na osobu.
 - **Spolucestující** – pozvání e-mailem s rolí „upravuje“ nebo „jen čte“. Kdo ještě nemá účet, uvidí výlet hned po registraci.

@@ -1,5 +1,7 @@
 // Katalog destinací. Ceny jsou orientační průměry (Kč / osoba / den bez ubytování a dopravy).
 // distanceKm = přibližná vzdušná vzdálenost z Prahy (pro odhad dopravy).
+import { MORE } from './destinations-more.js';
+
 export const CONTINENTS = {
   europe: 'Evropa',
   asia: 'Asie',
@@ -111,6 +113,16 @@ export const DESTINATIONS = [
   d('fiji', 'Fidži', 'Fidži', 'oceania', ['beach', 'nature'], 16300, 2300, [5, 6, 7, 8, 9, 10], '🌺',
     'Korálové ostrovy, potápění a pohostinnost „Bula!“.', { lat: -17.71, lng: 178.07, airport: 'NAN', currency: 'FJD', language: 'angličtina, fidžijština' }),
 ];
+
+// Vzdušná vzdálenost z Prahy (km)
+const fromPrague = (lat, lng) => {
+  const r = (x) => (x * Math.PI) / 180;
+  const h = Math.sin(r(lat - 50.08) / 2) ** 2 + Math.cos(r(50.08)) * Math.cos(r(lat)) * Math.sin(r(lng - 14.43) / 2) ** 2;
+  return Math.round(12742 * Math.asin(Math.sqrt(h)));
+};
+for (const [id, name, country, continent, tags, dailyCost, months, emoji, desc, lat, lng, airport, currency, language] of MORE) {
+  DESTINATIONS.push(d(id, name, country, continent, tags, fromPrague(lat, lng), dailyCost, months, emoji, desc, { lat, lng, airport, currency, language }));
+}
 
 export function findDestination(id) {
   return DESTINATIONS.find((x) => x.id === id) || null;
