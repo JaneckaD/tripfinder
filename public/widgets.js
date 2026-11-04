@@ -276,6 +276,28 @@ export function baseTiles(L, map, { withLayers = false, extraAttr = '' } = {}) {
   return osm;
 }
 
+// Dotyková zařízení: mapu posouvá jen dva prsty (jedním prstem se roluje stránka), přiblížení gestem roztažení.
+// Leaflet při dvou prstech mapu posouvá i přibližuje (TouchZoom), stačí vypnout tažení jedním prstem.
+export const isTouch = () => matchMedia('(pointer: coarse)').matches;
+export function touchMapOptions() { return isTouch() ? { dragging: false, tap: false, touchZoom: true } : {}; }
+export function twoFingerHint(el) {
+  if (!isTouch()) return;
+  el.classList.add('two-finger');
+  const hint = document.createElement('div');
+  hint.className = 'map-hint';
+  hint.innerHTML = '<span>✌️ Mapu posuneš dvěma prsty</span>';
+  el.appendChild(hint);
+  let timer = 0; let start = null;
+  el.addEventListener('touchstart', (e) => { start = e.touches.length === 1 ? e.touches[0] : null; if (e.touches.length > 1) el.classList.remove('hint-on'); }, { passive: true });
+  el.addEventListener('touchmove', (e) => {
+    if (e.touches.length !== 1 || !start) return;
+    const t = e.touches[0];
+    if (Math.hypot(t.clientX - start.clientX, t.clientY - start.clientY) < 12) return;
+    el.classList.add('hint-on'); clearTimeout(timer);
+    timer = setTimeout(() => el.classList.remove('hint-on'), 1400);
+  }, { passive: true });
+}
+
 // points: [{lat, lng, label, sub, num, color, kind:'stop'|'stay'|'origin'}]
 // segments: [{from:[lat,lng], to:[lat,lng], mode, label}]
 export async function drawMap(el, { points = [], segments = [], legend = true } = {}) {
@@ -283,7 +305,8 @@ export async function drawMap(el, { points = [], segments = [], legend = true } 
   let L;
   try { L = await loadLeaflet(); } catch { el.innerHTML = '<div class="map-fallback">Mapu se nepodařilo načíst.</div>'; return null; }
   if (el._map) { el._map.remove(); }
-  const map = L.map(el, { scrollWheelZoom: false, zoomControl: true, attributionControl: true, worldCopyJump: true });
+  const map = L.map(el, { scrollWheelZoom: false, zoomControl: true, attributionControl: true, worldCopyJump: true, ...touchMapOptions() });
+  twoFingerHint(el);
   el._map = map;
   baseTiles(L, map);
   const bounds = [];

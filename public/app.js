@@ -1,6 +1,6 @@
 // TripFinder – frontend (vanilla JS, bez build kroku). Jednoduchý hash router.
 import { setupSocial, loadProfile, profileBlock, profileHints, ageDiscount, applyHomeOrigin, refreshBadge, viewWelcome, viewChat, viewInvite } from './social.js';
-import { autocomplete, calendar, guestsPicker, drawMap, loadLeaflet, baseTiles, stampSvg, MODE_STYLE, POPULAR_ORIGINS, shortDate, closePopover } from './widgets.js';
+import { autocomplete, calendar, guestsPicker, drawMap, loadLeaflet, baseTiles, stampSvg, touchMapOptions, twoFingerHint, MODE_STYLE, POPULAR_ORIGINS, shortDate, closePopover } from './widgets.js';
 
 const $app = document.getElementById('app');
 const state = { user: undefined, meta: null, all: [], photos: {}, search: loadSearch(), roundtrip: loadRoundtrip() };
@@ -226,8 +226,8 @@ async function viewSearch() {
       <h1>Kam tě srdce táhne <span class="accent">tentokrát?</span></h1>
       <p class="lead">Napiš město, adresu nebo zemi kdekoli na světě. Ukážeme ti letenky, vlaky, autobusy i ubytování na jednom místě.</p>
       <div class="dock-tabs" role="tablist">
-        <button role="tab" data-tab="trip" aria-selected="${s.tab !== 'route'}">${icon('pin', 'sm')} Výlet do jednoho místa</button>
-        <button role="tab" data-tab="route" aria-selected="${s.tab === 'route'}">🔁 Okružní cesta po více městech</button>
+        <button role="tab" data-tab="trip" aria-selected="${s.tab !== 'route'}">${icon('pin', 'sm')} <span>Výlet do jednoho místa</span><span class="short">Jedno místo</span></button>
+        <button role="tab" data-tab="route" aria-selected="${s.tab === 'route'}">🔁 <span>Okružní cesta po více městech</span><span class="short">Okružní cesta</span></button>
       </div>
       <div id="dock"></div>
       <div class="quick"><span class="eyebrow">Rychlá volba:</span>${QUICK.map((q, i) => `<button class="chip" data-quick="${i}">${q.label}</button>`).join('')}</div>
@@ -985,7 +985,8 @@ async function viewExplore() {
   const L = await loadLeaflet().catch(() => null);
   const el = document.getElementById('explore-map');
   if (!L || !el) { if (el) el.innerHTML = '<div class="map-fallback">Mapu se nepodařilo načíst.</div>'; return; }
-  const map = L.map(el, { zoomControl: false, worldCopyJump: true });
+  const map = L.map(el, { zoomControl: false, worldCopyJump: true, ...touchMapOptions() });
+  twoFingerHint(el);
   L.control.zoom({ position: 'bottomright' }).addTo(map);
   baseTiles(L, map, { withLayers: true, extraAttr: ' · místa: Wikipedie, OSM, Reddit' });
   // Panel zakrývá pravý (na mobilu spodní) okraj mapy – při posunech s tím počítáme.
@@ -1042,7 +1043,15 @@ async function viewExplore() {
   };
   const renderPins = () => {
     layer.clearLayers();
-    for (const p of visible().slice(0, 90)) L.marker([p.lat, p.lng], { icon: pin(p), riseOnHover: true }).on('click', () => openPlace(p)).addTo(layer);
+    // Piny se nesmí překrývat: na malém přiblížení necháme jen ty, které mají kolem sebe místo.
+    const kept = []; const shown = []; const gap = window.innerWidth < 600 ? 40 : 46;
+    for (const p of visible()) {
+      const pt = map.latLngToContainerPoint([p.lat, p.lng]);
+      if (kept.some((k) => Math.abs(k.x - pt.x) < gap && Math.abs(k.y - pt.y) < gap)) continue;
+      kept.push(pt); shown.push(p);
+      if (shown.length >= 90) break;
+    }
+    for (const p of shown) L.marker([p.lat, p.lng], { icon: pin(p), riseOnHover: true }).on('click', () => openPlace(p)).addTo(layer);
   };
 
   const load = async () => {
@@ -1206,7 +1215,7 @@ async function passportBlock() {
     return `<section class="passport">
       <div class="passport-head"><div><span class="eyebrow">Cestovatelský pas</span><h2>${stamps.length ? `${plural(stamps.length, 'země', 'země', 'zemí')} v pasu` : 'Zatím prázdný pas'}</h2></div>
         <span class="small muted">${stamps.length ? 'Razítko dostaneš za každou zemi z výletu, který označíš jako dokončený.' : 'Dokonči výlet (tlačítko „Dokončit výlet“ v plánovači) a získáš razítko každé navštívené země.'}</span></div>
-      <div class="stamps">${stamps.map((x, i) => `<a class="stamp" href="#/trips/${x.tripId}" title="${esc(`${x.country} – ${x.tripTitle}`)}" style="--rot:${((i * 37) % 13) - 6}deg">${stampSvg(x)}<span class="small muted">${esc(x.place || x.country)}</span></a>`).join('')
+      <div class="stamps">${stamps.map((x, i) => `<div class="stamp" title="${esc(`${x.country} – ${x.tripTitle}`)}" style="--rot:${((i * 37) % 13) - 6}deg">${stampSvg(x)}<span class="small muted">${esc(x.place || x.country)}</span></div>`).join('')
         || `<div class="stamp ghost-stamp">${stampSvg({ cc: 'CZ', country: 'Tvoje první země', date: '' })}</div>`}</div>
     </section>`;
   } catch { return ''; }
@@ -1275,8 +1284,8 @@ async function viewTrips() {
       <div><span class="eyebrow">Můj plánovač</span><h1 style="font-size:34px;line-height:40px">Moje výlety</h1></div>
       <button class="btn" id="new">${icon('plus')} Nový výlet</button>
     </div>
-    ${trips.length ? `<div class="grid">${trips.map((t) => `
-      <a class="card trip-card" href="#/trips/${t.id}">
+    ${trips.length ? [trips.filter((t) => t.status !== 'done'), trips.filter((t) => t.status === 'done')].map((group, gi) => (group.length ? `${gi ? `<div class="section-head"><div><span class="eyebrow">Archiv</span><h2>Dokončené výlety</h2></div></div>` : ''}<div class="grid">${group.map((t) => `
+      <a class="card trip-card${t.status === 'done' ? ' done' : ''}" href="#/trips/${t.id}">
         <div class="media" style="${cover('europe')}">${t.cover ? photo(t.cover, '🧳') : '<div class="fallback">🧳</div>'}
           <div class="badges"><span class="pill glass">${{ owner: 'Můj výlet', editor: 'Spolucestující', viewer: 'Jen čtení' }[t.role]}</span>${t.status === 'done' ? '<span class="pill mint">🏆 Dokončeno</span>' : countdown(t.start_date)}</div></div>
         <div class="body">
@@ -1284,7 +1293,7 @@ async function viewTrips() {
           <div class="small muted">${icon('calendar', 'sm')} ${fmtRange(t.start_date, t.end_date)} · ${plural(t.persons, 'osoba', 'osoby', 'osob')}</div>
           <div class="row"><span class="small faint">${plural(t.item_count, 'položka', 'položky', 'položek')} · 👥 ${t.member_count + 1}</span><span class="price" style="font-size:18px">${czk(t.total)}</span></div>
         </div>
-      </a>`).join('')}</div>`
+      </a>`).join('')}</div>` : '')).join('')
       : emptyState('🧳', 'Zatím nemáš žádný výlet. Najdi destinaci a ulož si dopravu nebo ubytování.', '<a class="btn" href="#/">Začít objevovat</a>')}`;
   document.getElementById('new').onclick = () => modal(`<h2>Nový výlet</h2><form id="f" style="margin-top:16px">${tripForm()}
       <div class="modal-actions"><button type="button" class="btn ghost" data-close>Zrušit</button><button class="btn">Vytvořit</button></div></form>`, (m, close) => {
