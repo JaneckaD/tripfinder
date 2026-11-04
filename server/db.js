@@ -83,6 +83,10 @@ export async function openDb({
     client = createClient({ url: `file:${path}` });
   }
   await client.executeMultiple(SCHEMA);
+  // Migrace: sloupce přidané později (ALTER selže, když už existují – to je v pořádku).
+  for (const sql of ['ALTER TABLE trips ADD COLUMN budget REAL']) {
+    try { await client.execute(sql); } catch { /* sloupec už existuje */ }
+  }
 
   const exec = (sql, args) => client.execute({ sql, args });
   return {
