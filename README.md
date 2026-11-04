@@ -33,7 +33,7 @@ Proměnné prostředí:
 |--------------|-------------------------|-------|
 | `PORT`       | `3000`                  | Port serveru |
 | `DB_PATH`    | `./data/tripfinder.db`  | Soubor SQLite databáze |
-| `PROVIDERS`  | všichni                 | Čárkami oddělená id zapnutých poskytovatelů, např. `travelpayouts,liteapi,booking` |
+| `PROVIDERS`  | všichni                 | Čárkami oddělená id zapnutých poskytovatelů, např. `travelpayouts,serpapi,airbnb` |
 | `TRAVELPAYOUTS_TOKEN`, `TRAVELPAYOUTS_MARKER` | – | Letenky z Aviasales (viz níže) |
 | `SERPAPI_KEY`, `SERPAPI_MONTHLY_LIMIT` | –, `240` | Google Flights + Airbnb |
 | `NODE_ENV`   | –                       | `production` zapne `Secure` cookie (nutné HTTPS) |
@@ -69,7 +69,7 @@ server/
   providers/
     index.js          rozhraní a registr poskytovatelů
     mock.js           ukázková data + odkazy na Booking, Airbnb, Skyscanner…
-    live/             skuteční poskytovatelé (Travelpayouts, SerpApi, LiteAPI), mezipaměť a limity
+    live/             skuteční poskytovatelé (Travelpayouts, SerpApi – Google Flights a Airbnb), mezipaměť a limity
 public/               frontend (vanilla JS, bez build kroku), manifest, service worker, ikony
 test/                 API testy (node:test)
 ```

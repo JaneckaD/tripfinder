@@ -2,8 +2,8 @@
 //
 // Každý poskytovatel implementuje stejné rozhraní:
 //   {
-//     id: 'liteapi',               // unikátní id
-//     name: 'LiteAPI hotely',      // zobrazované jméno
+//     id: 'airbnb-live',          // unikátní id
+//     name: 'Airbnb',             // zobrazované jméno
 //     kind: 'transport' | 'lodging',
 //     website: 'https://...',
 //     mode: 'mock' | 'live',       // mock = ukázková data, live = skutečné API
