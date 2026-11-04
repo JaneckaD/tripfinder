@@ -250,3 +250,6 @@ textarea { min-height: 80px; resize: vertical; }
 
 .skeleton { background: linear-gradient(90deg, var(--surface-2), var(--surface), var(--surface-2)); background-size: 200% 100%; animation: sk 1.2s infinite; border-radius: var(--radius); height: 92px; }
 @keyframes sk { to { background-position: -200% 0; } }
+
+.compare-links { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin-top: .75rem; }
+.compare-links .chip { text-decoration: none; }

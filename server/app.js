@@ -4,12 +4,13 @@ import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { COOKIE, createSession, hashPassword, loadUser, requireUser, sessionCookie, verifyPassword } from './auth.js';
 import { CONTINENTS, TAGS, findDestination, searchDestinations } from './data/destinations.js';
-import { listProviders, searchOffers } from './providers/index.js';
+import { createProviders } from './providers/index.js';
 
 const PUBLIC_DIR = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'public');
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export function createApp(db, { secureCookies = process.env.NODE_ENV === 'production' } = {}) {
+export function createApp(db, { secureCookies = process.env.NODE_ENV === 'production', env = process.env } = {}) {
+  const providers = createProviders(db, env);
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '200kb' }));
@@ -52,7 +53,7 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
   api.get('/auth/me', (req, res) => res.json({ user: req.user }));
 
   // ---------- Vyhledávání ----------
-  api.get('/meta', (_req, res) => res.json({ continents: CONTINENTS, tags: TAGS, providers: listProviders() }));
+  api.get('/meta', (_req, res) => res.json({ continents: CONTINENTS, tags: TAGS, providers: providers.list(), serpapi: providers.serpapiUsage() }));
 
   api.get('/destinations', (req, res) => {
     const { continent, q, tags, maxBudget, persons, nights, month, sort } = req.query;
@@ -70,7 +71,7 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
     if (!dest) return bad(res, 'Destinace nenalezena.', 404);
     const { from, to, persons, origin } = req.query;
     if (from && to && new Date(to) <= new Date(from)) return bad(res, 'Datum návratu musí být po datu odjezdu.');
-    res.json(await searchOffers(dest, { from, to, persons, origin }));
+    res.json(await providers.search(dest, { from, to, persons, origin }));
   });
 
   // ---------- Výlety ----------

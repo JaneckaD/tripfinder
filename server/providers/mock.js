@@ -127,15 +127,16 @@ export const mockTransportProviders = [
     search(ctx) { return Promise.resolve(flightOffers(this, ctx, { count: 3, priceFactor: 0.97 })); },
   },
   {
-    id: 'amadeus', name: 'Amadeus (aerolinky)', kind: 'transport', website: 'https://developers.amadeus.com', mode: 'mock',
-    offers: 'Data letenek přímo z rezervačního systému aerolinek (GDS)',
+    id: 'amadeus', name: 'Google Flights', linkName: 'Google Flights', kind: 'transport', website: 'https://www.google.com/travel/flights', mode: 'mock',
+    offers: 'Přehled letů všech aerolinek',
     link: (c) => `https://www.google.com/travel/flights?q=${enc(`Flights from ${c.origin} to ${c.dest.airport} on ${c.from} through ${c.to}`)}`,
     search(ctx) { return Promise.resolve(flightOffers(this, ctx, { count: 2, priceFactor: 1.05 })); },
   },
   {
-    id: 'flixbus', name: 'FlixBus / RegioJet', kind: 'transport', website: 'https://www.flixbus.cz', mode: 'mock',
+    id: 'flixbus', name: 'Vlaky a autobusy', linkName: 'Vlaky a autobusy (Omio)', kind: 'transport', website: 'https://www.omio.cz', mode: 'mock',
     offers: 'Autobusy a vlaky po Evropě',
-    link: () => 'https://www.flixbus.cz/',
+    applies: (c) => c.dest.continent === 'europe' && c.dest.distanceKm <= 1500,
+    link: () => 'https://www.omio.cz/',
     search(ctx) { return Promise.resolve(groundOffers(this, ctx, { types: ['bus', 'train'] })); },
   },
 ];

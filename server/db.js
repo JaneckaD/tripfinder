@@ -59,6 +59,21 @@ export function openDb(path = process.env.DB_PATH || './data/tripfinder.db') {
       role     TEXT NOT NULL DEFAULT 'editor' CHECK (role IN ('editor','viewer')),
       UNIQUE (trip_id, email)
     );
+
+    -- Mezipaměť odpovědí externích API (šetří limity bezplatných tarifů).
+    CREATE TABLE IF NOT EXISTS api_cache (
+      key        TEXT PRIMARY KEY,
+      value      TEXT NOT NULL,
+      expires_at INTEGER NOT NULL
+    );
+
+    -- Počet volání externích API za měsíc (hlídání limitu, např. SerpApi 250/měsíc).
+    CREATE TABLE IF NOT EXISTS api_usage (
+      provider TEXT NOT NULL,
+      month    TEXT NOT NULL,
+      count    INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (provider, month)
+    );
   `);
   return db;
 }
