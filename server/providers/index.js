@@ -15,15 +15,14 @@
 //
 // Skuteční poskytovatelé se zapnou sami, když je v prostředí jejich API klíč:
 //   TRAVELPAYOUTS_TOKEN (+ volitelně TRAVELPAYOUTS_MARKER) – letenky Aviasales
-//   SERPAPI_KEY (+ SERPAPI_MONTHLY_LIMIT, výchozí 240)    – Google Flights + Google Hotels
-//   LITEAPI_KEY                                            – hotely LiteAPI
+//   SERPAPI_KEY (+ SERPAPI_MONTHLY_LIMIT, výchozí 240)    – Google Flights + Airbnb
 // Když pro daný druh (doprava / ubytování) běží aspoň jeden skutečný poskytovatel,
 // ukázkové nabídky toho druhu se skryjí a místo nich se zobrazí jen odkazy
-// „porovnat i na Booking.com, Airbnb…“. PROVIDERS=id1,id2 omezí, kdo je zapnutý.
+// „porovnat i na Skyscanneru, Omiu…“. PROVIDERS=id1,id2 omezí, kdo je zapnutý.
 import { mockTransportProviders, mockLodgingProviders } from './mock.js';
 import { makeCache, makeQuota } from './live/common.js';
 import { travelpayoutsProvider, serpFlightsProvider } from './live/flights.js';
-import { liteApiProvider, serpHotelsProvider } from './live/hotels.js';
+import { serpAirbnbProvider } from './live/airbnb.js';
 import { countryInfo, haversineKm, resolveOrigin } from '../geo.js';
 
 export function buildSearchContext(dest, { from, to, persons = 2, origin = 'PRG', oneWay = false } = {}) {
@@ -58,9 +57,8 @@ export function createProviders(db, env = process.env) {
   if (env.TRAVELPAYOUTS_TOKEN) live.push(travelpayoutsProvider({ token: env.TRAVELPAYOUTS_TOKEN, marker: env.TRAVELPAYOUTS_MARKER, cached }));
   if (env.SERPAPI_KEY) {
     live.push(serpFlightsProvider({ apiKey: env.SERPAPI_KEY, cached, quota, monthlyLimit }));
-    live.push(serpHotelsProvider({ apiKey: env.SERPAPI_KEY, cached, quota, monthlyLimit }));
+    live.push(serpAirbnbProvider({ apiKey: env.SERPAPI_KEY, cached, quota, monthlyLimit }));
   }
-  if (env.LITEAPI_KEY) live.push(liteApiProvider({ apiKey: env.LITEAPI_KEY, cached }));
 
   const wanted = (env.PROVIDERS || '').split(',').map((s) => s.trim()).filter(Boolean);
   const allow = (p) => !wanted.length || wanted.includes(p.id);
@@ -68,7 +66,8 @@ export function createProviders(db, env = process.env) {
   const lives = live.filter(allow);
   const hasLive = (kind) => lives.some((p) => p.kind === kind);
   // Ukázkoví poskytovatelé daného druhu běží jen tehdy, když pro něj není žádný skutečný.
-  const searchers = [...lives, ...mocks.filter((p) => !hasLive(p.kind))];
+  // „Autem / pěšky“ není ukázka, ale vlastní výpočet – běží vždy.
+  const searchers = [...lives, ...mocks.filter((p) => p.mode === 'own' || !hasLive(p.kind))];
 
   return {
     list() {
@@ -97,8 +96,8 @@ export function createProviders(db, env = process.env) {
 
       // Když všichni skuteční poskytovatelé jednoho druhu selžou, ukážeme aspoň ukázková data.
       for (const kind of opts.kinds || ['transport', 'lodging']) {
-        if (hasLive(kind) && !offers[kind].length) {
-          const fallback = await Promise.all(mocks.filter((p) => p.kind === kind).map((p) => p.search(ctx).catch(() => [])));
+        if (hasLive(kind) && !offers[kind].some((o) => !o.own)) {
+          const fallback = await Promise.all(mocks.filter((p) => p.kind === kind && p.mode !== 'own').map((p) => p.search(ctx).catch(() => [])));
           offers[kind].push(...fallback.flat());
         }
       }
@@ -108,7 +107,7 @@ export function createProviders(db, env = process.env) {
       // Odkazy na poskytovatele bez API (předvyplněné hledání).
       const links = { transport: [], lodging: [] };
       for (const p of mocks) {
-        if (!hasLive(p.kind) || (p.applies && !p.applies(ctx)) || (opts.kinds && !opts.kinds.includes(p.kind))) continue;
+        if (p.mode === 'own' || !hasLive(p.kind) || (p.applies && !p.applies(ctx)) || (opts.kinds && !opts.kinds.includes(p.kind))) continue;
         links[p.kind].push({ providerId: p.id, name: p.linkName || p.name, url: p.link(ctx) });
       }
 

@@ -35,8 +35,7 @@ Proměnné prostředí:
 | `DB_PATH`    | `./data/tripfinder.db`  | Soubor SQLite databáze |
 | `PROVIDERS`  | všichni                 | Čárkami oddělená id zapnutých poskytovatelů, např. `travelpayouts,liteapi,booking` |
 | `TRAVELPAYOUTS_TOKEN`, `TRAVELPAYOUTS_MARKER` | – | Letenky z Aviasales (viz níže) |
-| `SERPAPI_KEY`, `SERPAPI_MONTHLY_LIMIT` | –, `240` | Google Flights + Google Hotels |
-| `LITEAPI_KEY` | – | Hotely z LiteAPI |
+| `SERPAPI_KEY`, `SERPAPI_MONTHLY_LIMIT` | –, `240` | Google Flights + Airbnb |
 | `NODE_ENV`   | –                       | `production` zapne `Secure` cookie (nutné HTTPS) |
 
 ## Co umí
@@ -48,6 +47,9 @@ Proměnné prostředí:
 - **Okružní cesta** – více měst a zemí za sebou, noci v každé zastávce, doprava mezi nimi a ubytování, mapa trasy a uložení jako výlet.
 - **Mapa** – Leaflet + dlaždice CARTO Voyager; lety oranžovo-červeně obloukem, vlaky modře, autobusy zeleně.
 - **Akce na půl roku** – nejlevnější letenky (Travelpayouts `prices/latest`, bez klíče ukázkové ceny) a zvýhodněné ubytování po měsících.
+- **Prozkoumat** – mapa s piny s fotkami zajímavých míst v okolí (příroda, památky, kultura) z Wikipedie, detail místa a navigace k němu.
+- **Pěšky a autem** – trasy po cestách a silnicích z OpenStreetMap ([OSRM na routing.openstreetmap.de](https://routing.openstreetmap.de)) s pokyny po krocích a odkazem do Google Maps.
+- **Ubytování jen z Airbnb** – se `SERPAPI_KEY` skutečné inzeráty (SerpApi `engine=airbnb`) s fotkami a přímým odkazem na inzerát, bez klíče ukázka s odkazem na hledání Airbnb ve stejném místě a termínu.
 - **Cestovatelský pas** – dokončený výlet přidá do profilu razítko každé navštívené země (Francie má croissant, Itálie pizzu…).
 - **Účty** – registrace a přihlášení (hesla hashovaná scryptem, session v HttpOnly cookie).
 - **Výlety** – libovolný počet, ukládání destinací, dopravy, ubytování a poznámek s cenou, součet rozpočtu a cena na osobu.
@@ -77,8 +79,7 @@ test/                 API testy (node:test)
 Bez klíčů běží aplikace s ukázkovými cenami. Jakmile vložíš klíč, příslušný poskytovatel se zapne sám. Zkopíruj `.env.example` jako `.env`, doplň klíče a restartuj server (`npm start` soubor `.env` načte automaticky).
 
 1. **Travelpayouts** (letenky, zdarma): zaregistruj se na [travelpayouts.com](https://www.travelpayouts.com), připoj program Aviasales a v sekci *Tools → API* zkopíruj **API token** do `TRAVELPAYOUTS_TOKEN`. Číslo partnera (*marker*) dej do `TRAVELPAYOUTS_MARKER`, pak dostáváš provizi z rezervací přes odkazy.
-2. **SerpApi** (Google Flights + Google Hotels, 250 hledání měsíčně zdarma): registrace na [serpapi.com](https://serpapi.com), klíč z *Dashboard → Your API Key* do `SERPAPI_KEY`. Aplikace výsledky ukládá na 24 hodin a po `SERPAPI_MONTHLY_LIMIT` hledáních v měsíci SerpApi sama vypne.
-3. **LiteAPI** (hotely): registrace na [dashboard.liteapi.travel](https://dashboard.liteapi.travel), klíč z *API Keys* do `LITEAPI_KEY`. Testovací (sandbox) klíč je bez karty, pro ostrý klíč LiteAPI chce zadat kartu.
+2. **SerpApi** (Google Flights + Airbnb, 250 hledání měsíčně zdarma): registrace na [serpapi.com](https://serpapi.com), klíč z *Dashboard → Your API Key* do `SERPAPI_KEY`. Aplikace výsledky ukládá na 24 hodin a po `SERPAPI_MONTHLY_LIMIT` hledáních v měsíci SerpApi sama vypne.
 
 Když nějaké API selže, aplikace ukáže upozornění a zbylé výsledky. Booking.com, Airbnb, Skyscanner, Kiwi a vlaky nemají bezplatné API, takže se pod výsledky zobrazují jako odkazy „Porovnat i na…“ s předvyplněným hledáním.
 

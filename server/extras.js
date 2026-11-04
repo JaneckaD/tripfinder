@@ -1,6 +1,7 @@
 // Doplňkové bezplatné služby bez klíče: fotky destinací (Wikipedie) a předpověď počasí (Open-Meteo).
 import { getJson, makeCache } from './providers/live/common.js';
 import { LIVE_META } from './data/live-meta.js';
+import { DESTINATIONS } from './data/destinations.js';
 
 const UA = { 'User-Agent': 'TripFinder/0.1 (https://github.com/JaneckaD/tripfinder)' };
 const DAY = 86400000;
@@ -18,9 +19,22 @@ const describe = (code) => {
 
 export function createExtras(db) {
   const cached = makeCache(db);
-  return {
+  const titleOf = (dest) => LIVE_META[dest.id]?.wiki || dest.name;
+  const extras = {
+    // Mapa id -> URL fotky pro všechny katalogové destinace, které už jsou v mezipaměti.
+    async knownPhotos() {
+      const rows = await db.all("SELECT key, value FROM api_cache WHERE key LIKE 'photo:%' AND expires_at > ?", Date.now());
+      const byTitle = new Map(rows.map((r) => [r.key.slice(6), JSON.parse(r.value)?.url]));
+      return Object.fromEntries(DESTINATIONS.map((d) => [d.id, byTitle.get(titleOf(d))]).filter(([, u]) => u));
+    },
+    // Po startu serveru na pozadí načte fotky všech destinací, ať se stránka nečeká na Wikipedii.
+    async warmPhotos() {
+      const queue = [...DESTINATIONS];
+      const worker = async () => { for (let d = queue.shift(); d; d = queue.shift()) await extras.photo(d).catch(() => null); };
+      await Promise.all([worker(), worker(), worker()]);
+    },
     async photo(dest) {
-      const title = LIVE_META[dest.id]?.wiki || dest.name;
+      const title = titleOf(dest);
       return cached(`photo:${title}`, 30 * DAY, async () => {
         const res = await getJson(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`, { headers: UA });
         const thumb = res.thumbnail?.source;
@@ -46,4 +60,5 @@ export function createExtras(db) {
       });
     },
   };
+  return extras;
 }

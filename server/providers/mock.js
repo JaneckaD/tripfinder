@@ -178,43 +178,99 @@ function groundOffers(provider, ctx) {
   });
 }
 
-const LODGING_TYPES = {
-  booking: ['Hotel', 'Hotel', 'Apartmán', 'Penzion', 'Resort'],
-  airbnb: ['Celý byt', 'Celý dům', 'Soukromý pokoj', 'Loft', 'Vila'],
-  expedia: ['Hotel', 'Resort', 'Boutique hotel'],
-  hostelworld: ['Hostel – dorm', 'Hostel – soukromý pokoj'],
-};
-const NAMES = ['Central', 'Panorama', 'Sunset', 'Old Town', 'Garden', 'Harbour', 'Skyline', 'Boutique', 'Riverside', 'Green'];
-const AMENITIES = ['Snídaně v ceně', 'Bazén', 'Wi‑Fi', 'Kuchyňka', 'Parkování', 'Výhled na moře', 'Klimatizace', 'Pračka', 'Fitness', 'Bezplatné storno'];
+// Ukázkové nabídky ve stylu Airbnb (bez klíče SerpApi). Odkaz vede na hledání Airbnb ve stejném výřezu mapy
+// a termínu – konkrétní inzerát umí jen skutečná data (SerpApi engine=airbnb).
+const STAY_TYPES = [
+  ['Byt', 'Celý byt', 1], ['Apartmán', 'Celý apartmán', 1], ['Loft', 'Celý loft', 1.15], ['Dům', 'Celý dům', 1.7],
+  ['Pokoj', 'Soukromý pokoj', 0.55], ['Chata', 'Celá chata', 1.3], ['Vila', 'Celá vila', 2.2], ['Studio', 'Celé studio', 0.85],
+];
+const VIBES = ['se slunnou terasou', 'v historickém centru', 's výhledem', 'u parku', 'v klidné čtvrti', 's balkonem', 'designový', 'u řeky', 'pod střechou', 's vlastní zahradou'];
+const HIGHLIGHTS = ['Samostatný příjezd', 'Superhostitel', 'Výborná poloha', 'Bezplatné storno do 48 h', 'Rychlá Wi‑Fi', 'Plně vybavená kuchyně', 'Pračka', 'Klimatizace', 'Parkování zdarma', 'Pracovní kout', 'Domácí mazlíčci vítáni'];
+const HOSTS = ['Tereza', 'Marco', 'Ana', 'Lukas', 'Sofia', 'Jan', 'Elena', 'Kenji', 'Amira', 'Pierre', 'Lucía', 'Noah'];
 
-function lodgingOffers(provider, ctx, { count, priceFactor }) {
+export const airbnbSearchLink = (c) => {
+  const d = c.dest; const km = d.geo ? 4 : 8;
+  const dLat = km / 111; const dLng = km / (111 * Math.max(0.2, Math.cos((d.lat * Math.PI) / 180)));
+  return `https://www.airbnb.cz/s/${enc(d.name)}/homes?${new URLSearchParams({
+    checkin: c.from, checkout: c.to, adults: String(c.persons), search_by_map: 'true',
+    ne_lat: (d.lat + dLat).toFixed(4), ne_lng: (d.lng + dLng).toFixed(4), sw_lat: (d.lat - dLat).toFixed(4), sw_lng: (d.lng - dLng).toFixed(4),
+  })}`;
+};
+
+function lodgingOffers(provider, ctx, { count }) {
   const { dest, persons, nights } = ctx;
   const rnd = seeded(provider.id, dest.id, ctx.from, ctx.to, String(persons));
-  const types = LODGING_TYPES[provider.id];
-  const units = provider.id === 'hostelworld' ? persons : Math.ceil(persons / 2);
   return Array.from({ length: count }, (_, i) => {
-    const type = pick(rnd, types);
-    const perNight = round((600 + dest.dailyCost * 0.9) * priceFactor * (0.6 + rnd() * 1.1) * (type.includes('dům') || type === 'Vila' ? 1.8 : 1));
-    const isWhole = /Celý|Vila|Apartmán|Loft/.test(type);
-    const nightTotal = isWhole ? perNight * Math.max(1, Math.ceil(persons / 4)) : perNight * units;
-    const amenities = AMENITIES.filter(() => rnd() < 0.35).slice(0, 4);
-    const distance = 0.3 + rnd() * 4;
+    const [short, type, factor] = pick(rnd, STAY_TYPES);
+    const bedrooms = short === 'Pokoj' || short === 'Studio' ? 1 : Math.max(1, Math.ceil(persons / 2) + (rnd() < 0.3 ? 1 : 0));
+    const perNight = round((450 + dest.dailyCost * 0.75) * factor * (0.7 + rnd() * 0.9) * Math.max(1, persons / 2.5));
+    const distance = 0.2 + rnd() * 3.5;
     const angle = rnd() * Math.PI * 2;
+    const rating = Math.round((4.55 + rnd() * 0.45) * 100) / 100;
+    const host = pick(rnd, HOSTS);
+    const hl = HIGHLIGHTS.filter(() => rnd() < 0.3).slice(0, 4);
     return {
-      id: `${provider.id}-${dest.id}-${i}`, providerId: provider.id, providerName: provider.name, kind: 'lodging',
-      title: `${type} ${pick(rnd, NAMES)} ${dest.name}`,
-      subtitle: `${distance.toFixed(1)} km od centra`,
-      price: nightTotal * nights,
-      priceNote: `${czk(nightTotal)} Kč / noc · ${nights} ${nights === 1 ? 'noc' : nights < 5 ? 'noci' : 'nocí'}`,
-      currency: 'CZK', rating: Math.round((7 + rnd() * 2.8) * 10) / 10,
-      details: amenities.length ? amenities : ['Wi‑Fi'],
+      id: `${provider.id}-${dest.id}-${i}`, providerId: provider.id, providerName: 'Airbnb', kind: 'lodging',
+      title: `${short} ${pick(rnd, VIBES)}`,
+      subtitle: `${type} · ${distance.toFixed(1)} km od centra · hostitel ${host}`,
+      price: perNight * nights,
+      priceNote: `${czk(perNight)} Kč / noc · ${nights} ${nights === 1 ? 'noc' : nights < 5 ? 'noci' : 'nocí'}`,
+      currency: 'CZK', rating, ratingScale: 5, reviews: 5 + Math.floor(rnd() * 380),
+      details: [`${bedrooms} ${bedrooms === 1 ? 'ložnice' : bedrooms < 5 ? 'ložnice' : 'ložnic'}`, `${bedrooms + (rnd() < 0.5 ? 1 : 0)} postele`, `${Math.max(1, Math.ceil(bedrooms / 2))} koupelna`],
+      amenities: hl, badges: rating > 4.9 ? ['Oblíbené u hostů'] : [],
       stayType: type,
       location: { lat: dest.lat + (Math.sin(angle) * distance) / 111, lng: dest.lng + (Math.cos(angle) * distance) / (111 * Math.cos((dest.lat * Math.PI) / 180)) },
       checkin: ctx.from, checkout: ctx.to, nights,
-      photos: [], // ukázková data nemají skutečné fotky – ty dodá LiteAPI / Google Hotels
-      deepLink: provider.link(ctx), mock: true,
+      photos: [],
+      deepLink: provider.link(ctx), direct: false, mock: true,
     };
   });
+}
+
+// Vlastní cestou: autem nebo pěšky (časy a vzdálenost odhadem, přesnou trasu dodá /api/directions).
+function ownWayOffers(provider, ctx) {
+  const { dest, persons } = ctx;
+  const from = ctx.originPlace; const to = destPoint(dest);
+  const km = haversineKm(from, to);
+  const out = [];
+  const sameLand = dest.continent === ctx.originContinent;
+  if (km >= 3 && km <= 2500 && sameLand) {
+    const roadKm = Math.round(km * 1.25);
+    const durationMin = round((roadKm / (roadKm > 150 ? 88 : 55)) * 60 + Math.floor(roadKm / 250) * 25, 5);
+    const cars = Math.ceil(persons / 5);
+    const fuel = round(roadKm * 2.9 * cars * (ctx.oneWay ? 1 : 2));
+    const tolls = round(roadKm > 150 ? 400 + roadKm * 0.6 : 0) * cars * (ctx.oneWay ? 1 : 2);
+    const depart = `${ctx.from}T08:00`;
+    const leg = { mode: 'car', from: from.name, to: to.name, fromPt: pt(from), toPt: pt(to), depart, arrive: addMin(depart, durationMin), durationMin, carrier: 'Vlastní auto', number: `${roadKm} km`, distanceKm: roadKm, routable: true };
+    out.push({
+      id: `${provider.id}-${dest.id}-car`, providerId: provider.id, providerName: 'Autem', kind: 'transport', mode: 'car',
+      title: `Autem ${from.name} → ${dest.name}`,
+      subtitle: `${roadKm.toLocaleString('cs-CZ')} km · ${fmtMin(durationMin)} jízdy${roadKm > 450 ? ' · doporučená pauza' : ''}`,
+      price: fuel + tolls, priceNote: `palivo ~${czk(fuel)} Kč${tolls ? ` + dálnice ~${czk(tolls)} Kč` : ''} · ${cars > 1 ? `${cars} auta` : '1 auto'}${ctx.oneWay ? '' : ' · tam i zpět'}`,
+      currency: 'CZK', rating: null,
+      details: ['Odjezd kdykoli', `~${fmtMin(durationMin)}`, 'Cena paliva odhadem 7 l / 100 km'],
+      legs: [leg], returnLegs: ctx.oneWay ? null : [{ ...leg, from: to.name, to: from.name, fromPt: pt(to), toPt: pt(from), depart: `${ctx.to}T10:00`, arrive: addMin(`${ctx.to}T10:00`, durationMin) }],
+      durationMin, changes: 0,
+      deepLink: `https://www.google.com/maps/dir/?api=1&origin=${from.lat},${from.lng}&destination=${to.lat},${to.lng}&travelmode=driving`, mock: false, estimate: true, own: true,
+    });
+  }
+  if (km <= 45) {
+    const walkKm = Math.round(km * 1.3 * 10) / 10;
+    const durationMin = round((walkKm / 4.5) * 60, 5);
+    const depart = `${ctx.from}T08:00`;
+    out.push({
+      id: `${provider.id}-${dest.id}-walk`, providerId: provider.id, providerName: 'Pěšky', kind: 'transport', mode: 'walk',
+      title: `Pěšky ${from.name} → ${dest.name}`,
+      subtitle: `${walkKm.toLocaleString('cs-CZ')} km · ${fmtMin(durationMin)} chůze${walkKm > 20 ? ' · celodenní túra' : ''}`,
+      price: 0, priceNote: 'zdarma · vlastní nohy',
+      currency: 'CZK', rating: null,
+      details: [`~${fmtMin(durationMin)}`, 'Trasa po cestách a stezkách (OpenStreetMap)', walkKm > 15 ? 'Vezmi vodu a pevné boty' : 'Pohodová procházka'],
+      legs: [{ mode: 'walk', from: from.name, to: to.name, fromPt: pt(from), toPt: pt(to), depart, arrive: addMin(depart, durationMin), durationMin, carrier: 'Pěšky', number: `${walkKm} km`, distanceKm: walkKm, routable: true }],
+      returnLegs: null, durationMin, changes: 0,
+      deepLink: `https://www.google.com/maps/dir/?api=1&origin=${from.lat},${from.lng}&destination=${to.lat},${to.lng}&travelmode=walking`, mock: false, own: true,
+    });
+  }
+  return out;
 }
 
 export const mockTransportProviders = [
@@ -243,31 +299,19 @@ export const mockTransportProviders = [
     link: () => 'https://www.omio.cz/',
     search(ctx) { return Promise.resolve(groundOffers(this, ctx)); },
   },
+  {
+    id: 'own', name: 'Autem nebo pěšky', kind: 'transport', website: 'https://www.openstreetmap.org', mode: 'own',
+    offers: 'Vlastní auto (palivo a dálnice odhadem) nebo pěšky, trasa z OpenStreetMap',
+    link: (c) => `https://www.google.com/maps/dir/?api=1&origin=${c.originPlace.lat},${c.originPlace.lng}&destination=${c.dest.lat},${c.dest.lng}`,
+    search(ctx) { return Promise.resolve(ownWayOffers(this, ctx)); },
+  },
 ];
 
 export const mockLodgingProviders = [
   {
-    id: 'booking', name: 'Booking.com', kind: 'lodging', website: 'https://www.booking.com', mode: 'mock',
-    offers: 'Hotely, apartmány, penziony',
-    link: (c) => `https://www.booking.com/searchresults.cs.html?ss=${enc(c.dest.name)}&checkin=${c.from}&checkout=${c.to}&group_adults=${c.persons}`,
-    search(ctx) { return Promise.resolve(lodgingOffers(this, ctx, { count: 3, priceFactor: 1 })); },
-  },
-  {
     id: 'airbnb', name: 'Airbnb', kind: 'lodging', website: 'https://www.airbnb.cz', mode: 'mock',
-    offers: 'Soukromé byty, domy a pokoje',
-    link: (c) => `https://www.airbnb.cz/s/${enc(c.dest.name)}/homes?checkin=${c.from}&checkout=${c.to}&adults=${c.persons}`,
-    search(ctx) { return Promise.resolve(lodgingOffers(this, ctx, { count: 3, priceFactor: 0.95 })); },
-  },
-  {
-    id: 'expedia', name: 'Expedia / Hotels.com', kind: 'lodging', website: 'https://www.expedia.com', mode: 'mock',
-    offers: 'Hotely a resorty, balíčky let + hotel',
-    link: (c) => `https://www.expedia.com/Hotel-Search?destination=${enc(c.dest.name)}&startDate=${c.from}&endDate=${c.to}&adults=${c.persons}`,
-    search(ctx) { return Promise.resolve(lodgingOffers(this, ctx, { count: 2, priceFactor: 1.1 })); },
-  },
-  {
-    id: 'hostelworld', name: 'Hostelworld', kind: 'lodging', website: 'https://www.hostelworld.com', mode: 'mock',
-    offers: 'Levné hostely pro batůžkáře',
-    link: (c) => `https://www.hostelworld.com/search?search_keywords=${enc(c.dest.name)}&date_from=${c.from}&date_to=${c.to}&number_of_guests=${c.persons}`,
-    search(ctx) { return Promise.resolve(lodgingOffers(this, ctx, { count: 1, priceFactor: 0.35 })); },
+    offers: 'Byty, domy, chaty i pokoje od hostitelů Airbnb',
+    link: airbnbSearchLink,
+    search(ctx) { return Promise.resolve(lodgingOffers(this, ctx, { count: 8 })); },
   },
 ];
