@@ -41,7 +41,7 @@ let server; let base;
 before(async () => {
   globalThis.fetch = fakeUpstream;
   const env = { TRAVELPAYOUTS_TOKEN: 'tp', TRAVELPAYOUTS_MARKER: '123', SERPAPI_KEY: 'serp', SERPAPI_MONTHLY_LIMIT: '2', LITEAPI_KEY: 'lite-key' };
-  server = createApp(openDb(':memory:'), { env }).listen(0);
+  server = createApp(await openDb({ path: ':memory:', url: '' }), { env }).listen(0);
   await new Promise((r) => server.once('listening', r));
   base = `http://localhost:${server.address().port}/api`;
 });

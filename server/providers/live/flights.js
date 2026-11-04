@@ -56,7 +56,7 @@ export function serpFlightsProvider({ apiKey, cached, quota, monthlyLimit }) {
     async search(ctx) {
       const { dest, origin, from, to, persons } = ctx;
       const load = async () => {
-        quota.take('serpapi', monthlyLimit);
+        await quota.take('serpapi', monthlyLimit);
         return getJson(`https://serpapi.com/search.json?${new URLSearchParams({
           engine: 'google_flights', departure_id: origin, arrival_id: dest.airport, outbound_date: from, return_date: to,
           adults: String(persons), currency: 'CZK', hl: 'cs', gl: 'cz', api_key: apiKey,

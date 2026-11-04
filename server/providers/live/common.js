@@ -22,33 +22,28 @@ export async function getJson(url, { method = 'GET', headers = {}, body, timeout
 
 // Mezipaměť v SQLite. ttlMs = jak dlouho výsledek platí.
 export function makeCache(db) {
-  const get = db.prepare('SELECT value FROM api_cache WHERE key = ? AND expires_at > ?');
-  const put = db.prepare('INSERT OR REPLACE INTO api_cache (key, value, expires_at) VALUES (?, ?, ?)');
-  const purge = db.prepare('DELETE FROM api_cache WHERE expires_at <= ?');
   let lastPurge = 0;
   return async function cached(key, ttlMs, load) {
     const now = Date.now();
-    if (now - lastPurge > 3600000) { purge.run(now); lastPurge = now; }
-    const hit = get.get(key, now);
+    if (now - lastPurge > 3600000) { lastPurge = now; await db.run('DELETE FROM api_cache WHERE expires_at <= ?', now); }
+    const hit = await db.get('SELECT value FROM api_cache WHERE key = ? AND expires_at > ?', key, now);
     if (hit) return JSON.parse(hit.value);
     const value = await load();
-    put.run(key, JSON.stringify(value), now + ttlMs);
+    await db.run('INSERT OR REPLACE INTO api_cache (key, value, expires_at) VALUES (?, ?, ?)', key, JSON.stringify(value), now + ttlMs);
     return value;
   };
 }
 
 // Měsíční počítadlo volání; vyhodí chybu, když by se překročil limit.
 export function makeQuota(db) {
-  const read = db.prepare('SELECT count FROM api_usage WHERE provider = ? AND month = ?');
-  const bump = db.prepare(`INSERT INTO api_usage (provider, month, count) VALUES (?, ?, 1)
-    ON CONFLICT(provider, month) DO UPDATE SET count = count + 1`);
   const month = () => new Date().toISOString().slice(0, 7);
+  const used = async (provider) => (await db.get('SELECT count FROM api_usage WHERE provider = ? AND month = ?', provider, month()))?.count || 0;
   return {
-    used: (provider) => read.get(provider, month())?.count || 0,
-    take(provider, limit) {
-      const used = read.get(provider, month())?.count || 0;
-      if (used >= limit) throw new ProviderError(`Vyčerpán měsíční limit (${limit} hledání).`);
-      bump.run(provider, month());
+    used,
+    async take(provider, limit) {
+      if ((await used(provider)) >= limit) throw new ProviderError(`Vyčerpán měsíční limit (${limit} hledání).`);
+      await db.run(`INSERT INTO api_usage (provider, month, count) VALUES (?, ?, 1)
+        ON CONFLICT(provider, month) DO UPDATE SET count = count + 1`, provider, month());
     },
   };
 }

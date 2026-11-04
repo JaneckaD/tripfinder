@@ -17,10 +17,10 @@ export function verifyPassword(password, stored) {
   return timingSafeEqual(expected, actual);
 }
 
-export function createSession(db, userId) {
+export async function createSession(db, userId) {
   const token = randomBytes(32).toString('base64url');
   const expires = new Date(Date.now() + SESSION_DAYS * 86400000).toISOString();
-  db.prepare('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)').run(token, userId, expires);
+  await db.run('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)', token, userId, expires);
   return { token, expires };
 }
 
@@ -42,14 +42,15 @@ export function sessionCookie(token, expires, secure) {
 
 // Middleware: načte přihlášeného uživatele do req.user (nebo null).
 export function loadUser(db) {
-  const stmt = db.prepare(`
-    SELECT u.id, u.email, u.name FROM sessions s JOIN users u ON u.id = s.user_id
-    WHERE s.token = ? AND s.expires_at > ?`);
-  return (req, _res, next) => {
-    const token = parseCookies(req.headers.cookie)[COOKIE];
-    req.sessionToken = token || null;
-    req.user = token ? stmt.get(token, new Date().toISOString()) || null : null;
-    next();
+  const sql = `SELECT u.id, u.email, u.name FROM sessions s JOIN users u ON u.id = s.user_id
+    WHERE s.token = ? AND s.expires_at > ?`;
+  return async (req, _res, next) => {
+    try {
+      const token = parseCookies(req.headers.cookie)[COOKIE];
+      req.sessionToken = token || null;
+      req.user = token ? await db.get(sql, token, new Date().toISOString()) : null;
+      next();
+    } catch (err) { next(err); }
   };
 }
 
