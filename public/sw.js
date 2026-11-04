@@ -1,6 +1,6 @@
 // Service worker: aplikace (HTML/CSS/JS) funguje offline, API jde vždy na síť
 // a při výpadku vrací poslední uloženou odpověď (např. seznam výletů).
-const VERSION = 'tf-v4';
+const VERSION = 'tf-v5';
 const SHELL = ['/', '/index.html', '/styles.css', '/app.js', '/widgets.js', '/manifest.webmanifest', '/icons/icon.svg', '/icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {
@@ -26,10 +26,21 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // Stale-while-revalidate pro statické soubory.
-  e.respondWith(caches.match(request.mode === 'navigate' ? '/index.html' : request).then((cached) => {
-    const network = fetch(request).then((res) => {
+  // Aplikace (HTML/JS/CSS): vždy nejdřív síť, aby se po nasazení hned ukázala nová verze
+  // (dřív se nová verze objevila až po dalším načtení). Offline se použije uložená kopie.
+  const shell = request.mode === 'navigate' || /\.(js|css|html|webmanifest)$/.test(url.pathname);
+  if (shell) {
+    e.respondWith(fetch(request).then((res) => {
       if (res.ok && request.mode !== 'navigate') { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(request, copy)); }
+      return res;
+    }).catch(() => caches.match(request.mode === 'navigate' ? '/index.html' : request)));
+    return;
+  }
+
+  // Obrázky a ikony: z mezipaměti, na pozadí se obnoví.
+  e.respondWith(caches.match(request).then((cached) => {
+    const network = fetch(request).then((res) => {
+      if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(request, copy)); }
       return res;
     }).catch(() => cached);
     return cached || network;

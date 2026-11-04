@@ -7,6 +7,7 @@ import { CONTINENTS, TAGS, searchDestinations } from './data/destinations.js';
 import { LIVE_META } from './data/live-meta.js';
 import { countryInfo, geoId, makePlaceSearch, placeDestination, resolveDestination, resolveOrigin } from './geo.js';
 import { createDeals } from './deals.js';
+import { createDirections, createExplore } from './explore.js';
 import { makeCache } from './providers/live/common.js';
 import { createProviders } from './providers/index.js';
 import { createExtras } from './extras.js';
@@ -20,6 +21,12 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
   const cached = makeCache(db);
   const searchPlaces = makePlaceSearch(cached);
   const deals = createDeals({ env, cached });
+  const explore = createExplore({ cached });
+  const directions = createDirections({ cached });
+  const point = (v) => {
+    const [lat, lng] = String(v || '').split(',').map(Number);
+    return Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 ? { lat, lng } : null;
+  };
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '200kb' }));
@@ -78,6 +85,28 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
   api.get('/places', async (req, res) => {
     const q = String(req.query.q || '').slice(0, 120);
     res.json({ results: await searchPlaces(q, { limit: Math.min(10, Number(req.query.limit) || 8) }) });
+  });
+
+  // Prozkoumat: zajímavá místa s fotkami v okolí bodu
+  api.get('/explore', async (req, res) => {
+    const p = point(`${req.query.lat},${req.query.lng}`);
+    if (!p) return bad(res, 'Chybí souřadnice.');
+    try { res.json({ places: await explore.nearby(p.lat, p.lng, Number(req.query.radius) || 10000) }); } catch { bad(res, 'Místa v okolí teď nejdou načíst.', 502); }
+  });
+  api.get('/explore/place', async (req, res) => {
+    if (!req.query.title) return bad(res, 'Chybí název místa.');
+    try { res.json(await explore.place(String(req.query.lang || 'cs'), String(req.query.title).slice(0, 200))); } catch { bad(res, 'Detail místa teď nejde načíst.', 502); }
+  });
+  // Trasa pěšky / autem s navigací po krocích
+  api.get('/directions', async (req, res) => {
+    const from = point(req.query.from); const to = point(req.query.to);
+    if (!from || !to) return bad(res, 'Chybí odkud nebo kam.');
+    res.json(await directions(from, to, req.query.mode === 'foot' ? 'foot' : 'car'));
+  });
+  // Odkazy na fotky katalogových destinací, které už server zná (prohlížeč je pak načte rovnou).
+  api.get('/photos', async (_req, res) => {
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.json(await extras.knownPhotos());
   });
 
   // Akční letenky a ubytování na 6 měsíců dopředu
@@ -331,9 +360,10 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
   // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => {
     console.error(err);
-    res.status(err.status || 500).json({ error: err.status === 400 ? 'Neplatný požadavek.' : 'Něco se pokazilo na serveru.' });
+    res.status(err.status || 500).json({ error: err.status === 400 ? err.message || 'Neplatný požadavek.' : 'Něco se pokazilo na serveru.' });
   });
 
+  app.warmPhotos = () => extras.warmPhotos();
   return app;
 }
 

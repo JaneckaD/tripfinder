@@ -1,8 +1,8 @@
 // TripFinder – frontend (vanilla JS, bez build kroku). Jednoduchý hash router.
-import { autocomplete, calendar, guestsPicker, drawMap, stampSvg, MODE_STYLE, POPULAR_ORIGINS, nightsBetween, shortDate, closePopover } from './widgets.js';
+import { autocomplete, calendar, guestsPicker, drawMap, loadLeaflet, stampSvg, MODE_STYLE, POPULAR_ORIGINS, shortDate, closePopover } from './widgets.js';
 
 const $app = document.getElementById('app');
-const state = { user: undefined, meta: null, all: [], search: loadSearch(), roundtrip: loadRoundtrip() };
+const state = { user: undefined, meta: null, all: [], photos: {}, search: loadSearch(), roundtrip: loadRoundtrip() };
 
 // ---------- Utility ----------
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -42,7 +42,12 @@ const icon = (name, cls = '') => `<svg class="icon ${cls}" viewBox="0 0 24 24" a
 const enc = encodeURIComponent;
 const dHref = (id) => `#/d/${enc(id)}`;
 const photoUrl = (destId) => `/api/destinations/${enc(destId)}/photo`;
-const photo = (destId, emoji = '🌍', alt = '') => `<img src="${photoUrl(destId)}" alt="${esc(alt)}" loading="lazy" onload="this.classList.add('loaded')" onerror="this.remove()"><div class="fallback">${emoji}</div>`;
+// Známé fotky jdou rovnou z Wikimedie v potřebné velikosti (bez přesměrování přes server).
+const photoSrc = (destId, size = 640) => {
+  const u = state.photos?.[destId];
+  return u ? u.replace(/\/\d+px-/, `/${size}px-`) : photoUrl(destId);
+};
+const photo = (destId, emoji = '🌍', alt = '', size = 640) => `<img src="${photoSrc(destId, size)}" alt="${esc(alt)}" loading="lazy" decoding="async" onload="this.classList.add('loaded')" onerror="this.remove()"><div class="fallback">${emoji}</div>`;
 const time = (t) => (t ? t.slice(11, 16) : '');
 const dayLabel = (t) => (t ? new Date(t.slice(0, 10)).toLocaleDateString('cs-CZ', { weekday: 'short', day: 'numeric', month: 'numeric' }) : '');
 const fmtMin = (m) => (m ? `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}` : '');
@@ -65,7 +70,8 @@ const KIND = {
   lodging: { icon: '🏨', bg: 'var(--coral-soft)', label: 'Ubytování' },
   note: { icon: '📝', bg: 'var(--gold-soft)', label: 'Poznámka' },
 };
-const MODE_ICON = { flight: '✈️', bus: '🚌', train: '🚆', combo: '🔀', car: '🚕' };
+const MODE_ICON = { flight: '✈️', bus: '🚌', train: '🚆', combo: '🔀', car: '🚗', walk: '🥾' };
+const AIRBNB_LOGO = '<svg viewBox="0 0 32 32" width="18" height="18" aria-hidden="true"><path fill="#ff385c" d="M16 1c2 0 3.5 1 4.6 3.2l.2.4 8.2 16.9.2.4c.5 1.2.8 2.3.8 3.4 0 3.5-2.6 5.7-5.6 5.7-2.3 0-4.6-1.4-7.2-4.1l-.4-.4-.4.4c-2.6 2.7-4.9 4.1-7.2 4.1-3 0-5.6-2.2-5.6-5.7 0-1 .2-2 .7-3.2l.3-.6L11.4 4.6C12.5 2.1 14 1 16 1Zm0 2c-1.2 0-2.1.7-2.9 2.4l-.2.4-8.2 16.8c-.5 1.1-.7 2-.7 2.9 0 2.3 1.6 3.7 3.6 3.7 1.7 0 3.6-1.1 5.8-3.4l.6-.6c-1.9-2.4-3.1-4.7-3.1-6.6 0-2.8 2-4.6 5.1-4.6s5.1 1.8 5.1 4.6c0 1.9-1.2 4.2-3.1 6.6l.6.6c2.2 2.3 4.1 3.4 5.8 3.4 2 0 3.6-1.4 3.6-3.7 0-.8-.2-1.7-.7-2.7l-.2-.4L18.9 5.6C18.1 3.8 17.2 3 16 3Zm0 12.6c-2 0-3.1 1-3.1 2.6 0 1.4 1 3.3 3.1 5.9 2.1-2.6 3.1-4.5 3.1-5.9 0-1.6-1.1-2.6-3.1-2.6Z"/></svg>';
 const LOGO_TONES = [['var(--sky-soft)', '#0058bc'], ['var(--coral-soft)', '#c4161c'], ['var(--mint-soft)', '#1d8a3a'], ['var(--gold-soft)', '#a35d00'], ['var(--lavender-soft)', '#8a2fb8']];
 const logo = (name) => {
   const [bg, fg] = LOGO_TONES[[...name].reduce((a, c) => a + c.charCodeAt(0), 0) % LOGO_TONES.length];
@@ -178,6 +184,7 @@ const routes = [
   [/^#?\/?$/, viewSearch, 'search'],
   [/^#\/d\/(.+)$/, (id) => viewDestination(decodeURIComponent(id)), 'search'],
   [/^#\/route$/, viewRoundtrip, 'search'],
+  [/^#\/explore$/, viewExplore, 'explore'],
   [/^#\/trips$/, viewTrips, 'trips'],
   [/^#\/trips\/(\d+)$/, viewTrip, 'trips'],
   [/^#\/login$/, () => viewAuth('login'), 'account'],
@@ -193,6 +200,7 @@ async function route() {
     setActiveNav(nav);
     document.getElementById('modal-root').innerHTML = '';
     closePopover();
+    document.body.dataset.view = nav === 'explore' ? 'explore' : '';
     try { await view(...m.slice(1)); } catch (e) { $app.innerHTML = emptyState('😕', e.message, '<a class="btn" href="#/">Zpět na objevování</a>'); }
     window.scrollTo(0, 0);
     return;
@@ -501,7 +509,7 @@ async function viewDestination(id) {
   $app.innerHTML = `
     <a href="#/" class="back">${icon('back', 'sm')} Zpět na objevování</a>
     <section class="photo-hero">
-      <div class="media" style="${cover(d.continent)}">${photo(d.id, d.emoji, d.name)}</div>
+      <div class="media" style="${cover(d.continent)}">${photo(d.id, d.emoji, d.name, 1280)}</div>
       <span class="credit">Foto: Wikimedia Commons</span>
       <div class="content">
         <div class="tags"><span class="pill glass">${icon('pin', 'sm')} ${esc(d.country.toUpperCase())} · ${esc((continentName || '').toUpperCase())}</span>${tagNames.slice(0, 2).map((t) => `<span class="pill glass">${esc(t)}</span>`).join('')}</div>
@@ -628,9 +636,10 @@ async function loadOffers(d) {
       ${compareLinks(links.transport)}
     </section>
     <section data-kind="lodging">
-      <div class="section-title"><span class="ico" style="background:var(--coral-soft);color:var(--coral)">${icon('bed', 'sm')}</span><h2 style="font-size:20px">Ubytování v destinaci ${esc(d.name)}</h2><span class="count">${plural(lodging.length, 'nabídka', 'nabídky', 'nabídek')}</span></div>
-      <div class="offers">${lodging.map((o, i) => lodgingCard(o, i, d)).join('') || '<p class="muted">Pro tuto destinaci tu zatím nic nemáme.</p>'}</div>
-      ${compareLinks(links.lodging)}
+      <div class="section-title"><span class="ico airbnb-ico">${AIRBNB_LOGO}</span><h2 style="font-size:20px">Airbnb v destinaci ${esc(d.name)}</h2><span class="count">${plural(lodging.length, 'nabídka', 'nabídky', 'nabídek')}</span></div>
+      ${lodging.some((o) => o.mock) ? '<p class="small muted" style="margin:-4px 0 12px">Ukázkové nabídky – klik otevře Airbnb s tímto místem, termínem a počtem hostů. Skutečné inzeráty s fotkami a přímým odkazem se ukážou po vložení klíče SerpApi.</p>' : ''}
+      <div class="bnb-grid">${lodging.map((o, i) => lodgingCard(o, i, d)).join('') || '<p class="muted">Pro tuto destinaci tu zatím nic nemáme.</p>'}</div>
+      ${links.lodging[0] ? `<a class="btn glass" style="margin-top:14px" href="${esc(links.lodging[0].url)}" target="_blank" rel="noopener">Všechny nabídky v mapě Airbnb ${icon('ext', 'sm')}</a>` : ''}
     </section>`;
 
   el.querySelectorAll('[data-show]').forEach((b) => b.addEventListener('click', () => {
@@ -639,12 +648,12 @@ async function loadOffers(d) {
   }));
   const all = [...transport, ...lodging];
   const saveOffer = (o) => saveToTrip(o.kind, { ...o, destinationId: d.id, destinationName: d.name, from: ctx.from, to: ctx.to, persons: ctx.persons, cc: d.cc, lat: d.lat, lng: d.lng });
-  el.querySelectorAll('[data-save]').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); saveOffer(all.find((x) => x.id === b.dataset.save)); }));
+  el.querySelectorAll('[data-save]').forEach((b) => b.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); saveOffer(all.find((x) => x.id === b.dataset.save)); }));
   el.querySelectorAll('.offer a.btn').forEach((a) => a.addEventListener('click', (e) => e.stopPropagation()));
   el.querySelectorAll('[data-open]').forEach((c) => {
     const open = () => {
       const o = all.find((x) => x.id === c.dataset.open);
-      (o.kind === 'transport' ? transportDetail : lodgingDetail)(o, ctx, d, saveOffer);
+      transportDetail(o, ctx, d, saveOffer);
     };
     c.addEventListener('click', open);
     c.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === c) open(); });
@@ -692,11 +701,21 @@ function transportDetail(o, ctx, d, onSave) {
     <div class="detail-price"><div><div class="price">${czk(per)}</div><span class="small muted">za osobu · ${esc(o.priceNote.split('·').pop().trim())}</span></div><div style="text-align:right"><b>${czk(o.price)}</b><span class="small muted" style="display:block">celkem za ${plural(ctx.persons, 'osobu', 'osoby', 'osob')}</span></div></div>
     <div class="map small-map" id="offer-map"></div>
     <h3 class="leg-title">Tam · ${dayLabel(o.legs?.[0]?.depart || ctx.from)}${o.durationMin ? ` · ${fmtMin(o.durationMin)}` : ''}</h3>
-    ${legsTimeline(o.legs)}
-    ${o.returnLegs?.length ? `<h3 class="leg-title">Zpět · ${dayLabel(o.returnLegs[0].depart)}</h3>${legsTimeline(o.returnLegs)}` : ''}
+    ${o.legs?.[0]?.routable ? '<div id="own-route"><div class="skeleton" style="height:80px"></div></div>' : legsTimeline(o.legs)}
+    ${o.returnLegs?.length && !o.own ? `<h3 class="leg-title">Zpět · ${dayLabel(o.returnLegs[0].depart)}</h3>${legsTimeline(o.returnLegs)}` : ''}
     <div class="tags" style="margin-top:12px">${o.details.map((x) => `<span class="pill">${esc(x)}</span>`).join('')}</div>
-    <div class="modal-actions"><button class="btn glass" id="m-save">${icon('plus', 'sm')} Do výletu</button><a class="btn sky" href="${esc(o.deepLink)}" target="_blank" rel="noopener">Koupit u ${esc(o.providerName)} ${icon('ext', 'sm')}</a></div>`, (m) => {
+    <div class="modal-actions"><button class="btn glass" id="m-save">${icon('plus', 'sm')} Do výletu</button><a class="btn sky" href="${esc(o.deepLink)}" target="_blank" rel="noopener">${o.own ? 'Otevřít v Google Maps' : `Koupit u ${esc(o.providerName)}`} ${icon('ext', 'sm')}</a></div>`, (m) => {
     m.querySelector('#m-save').onclick = () => onSave(o);
+    const own = o.legs?.[0]?.routable ? o.legs[0] : null;
+    if (own) {
+      // Pěšky / autem: skutečná trasa po silnicích a stezkách + pokyny po krocích
+      const box = m.querySelector('#own-route');
+      const from = { lat: own.fromPt[0], lng: own.fromPt[1] }; const to = { lat: own.toPt[0], lng: own.toPt[1] };
+      api(`/directions?${new URLSearchParams({ from: own.fromPt.join(','), to: own.toPt.join(','), mode: own.mode === 'walk' ? 'foot' : 'car' })}`).then((r) => {
+        box.innerHTML = directionsHtml(r, from, to);
+        drawMap(m.querySelector('#offer-map'), { points: [{ ...from, label: own.from, num: 'A', color: '#007aff' }, { ...to, label: own.to, num: 'B' }], segments: [{ from: own.fromPt, to: own.toPt, mode: own.mode, path: r.geometry, label: `${own.from} → ${own.to}` }] });
+      }).catch(() => { box.innerHTML = ''; });
+    }
     const segs = legs.filter((l) => l.fromPt && l.toPt).map((l) => ({ from: l.fromPt, to: l.toPt, mode: l.mode, label: `${l.from} → ${l.to}` }));
     const stops = [];
     for (const l of o.legs || []) if (l.fromPt) stops.push({ lat: l.fromPt[0], lng: l.fromPt[1], label: l.from, sub: `odjezd ${time(l.depart)}` });
@@ -707,39 +726,10 @@ function transportDetail(o, ctx, d, onSave) {
   }, { wide: true });
 }
 
-// ---------- Detail ubytování ----------
-const stayEmoji = (o) => (/hostel/i.test(o.title) ? '🛏️' : /vila|dům/i.test(o.title) ? '🏡' : /byt|apart|loft/i.test(o.title) ? '🏠' : '🏨');
-function lodgingDetail(o, ctx, d, onSave) {
-  const pics = o.photos || [];
-  const nightsN = o.nights || ctx.nights;
-  modal(`
-    <div class="gallery ${pics.length > 1 ? 'multi' : ''}">
-      ${pics.length ? pics.slice(0, 5).map((u, i) => `<img src="${esc(u)}" alt="${esc(o.title)} – foto ${i + 1}" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">`).join('')
-        : `<div class="g-main" style="${cover(d.continent)}">${photo(d.id, stayEmoji(o), d.name)}<span class="pill glass g-note">Ilustrační foto destinace</span></div>`}
-      <button class="btn glass sm icon-only g-close" data-close aria-label="Zavřít">${icon('x', 'sm')}</button>
-    </div>
-    <div class="detail-head" style="margin-top:14px">
-      <div class="grow"><div class="tagline"><span class="pill sky">${esc(o.providerName)}</span>${o.rating ? `<span class="rating"><span class="star">★</span>${o.rating}</span>` : ''}${o.mock ? '<span class="pill">UKÁZKA</span>' : ''}</div>
-      <h2 style="margin-top:6px">${stayEmoji(o)} ${esc(o.title)}</h2><div class="small muted">${icon('pin', 'sm')} ${esc(o.subtitle)}</div></div>
-    </div>
-    <div class="stay-facts">
-      <div><span class="label">Příjezd</span><b>${dayLabel(o.checkin || ctx.from)}</b>${o.checkinTime ? `<small>od ${esc(o.checkinTime)}</small>` : ''}</div>
-      <div><span class="label">Odjezd</span><b>${dayLabel(o.checkout || ctx.to)}</b>${o.checkoutTime ? `<small>do ${esc(o.checkoutTime)}</small>` : ''}</div>
-      <div><span class="label">Hosté</span><b>${plural(ctx.persons, 'osoba', 'osoby', 'osob')}</b></div>
-    </div>
-    ${o.description ? `<p class="muted" style="margin-top:12px">${esc(o.description)}</p>` : ''}
-    <div class="tags" style="margin-top:12px">${[...new Set([...(o.details || []), ...(o.amenities || [])])].map((x) => `<span class="pill">${esc(x)}</span>`).join('')}</div>
-    <div class="detail-price"><div><span class="small muted">${czk(o.price / nightsN)} × ${plural(nightsN, 'noc', 'noci', 'nocí')}</span><div class="price">${czk(o.price)}</div></div><div style="text-align:right"><b>${czk(o.price / ctx.persons)}</b><span class="small muted" style="display:block">na osobu</span></div></div>
-    ${o.location ? '<div class="map small-map" id="stay-map"></div>' : ''}
-    ${o.mock ? '<p class="small faint" style="margin-top:8px">Ukázková nabídka – skutečné fotky a ceny hotelů se zobrazí po vložení klíče LiteAPI nebo SerpApi.</p>' : ''}
-    <div class="modal-actions"><button class="btn glass" id="m-save">${icon('plus', 'sm')} Do výletu</button><a class="btn" href="${esc(o.deepLink)}" target="_blank" rel="noopener">Rezervovat ${icon('ext', 'sm')}</a></div>`, (m) => {
-    m.querySelector('#m-save').onclick = () => onSave(o);
-    if (o.location) drawMap(m.querySelector('#stay-map'), { points: [{ lat: d.lat, lng: d.lng, label: `Centrum: ${d.name}`, num: '📍' }, { lat: o.location.lat, lng: o.location.lng, label: o.title, kind: 'stay' }], legend: false });
-  }, { wide: true });
-}
-
 const compareLinks = (links) => (links.length
   ? `<div class="compare-links"><span class="small muted">Porovnat i na:</span>${links.map((l) => `<a class="chip" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.name)} ${icon('ext')}</a>`).join('')}</div>` : '');
+
+const stayEmoji = (o) => (/pokoj|hostel/i.test(o.title) ? '🛏️' : /vila|dům|chata/i.test(o.title) ? '🏡' : '🏠');
 
 function transportCard(o, i, ctx, d) {
   const per = o.price / ctx.persons;
@@ -774,27 +764,26 @@ function transportCard(o, i, ctx, d) {
   </article>`;
 }
 
+// Karta Airbnb: klik vede přímo na inzerát (u ukázkových dat na hledání Airbnb ve stejném místě a termínu).
+const ratingText = (o) => (o.rating ? `★ ${String(o.rating).replace('.', ',')}${o.reviews ? ` (${o.reviews})` : ''}` : 'Nové');
 function lodgingCard(o, i, d) {
-  const pic = o.photos?.[0];
-  return `<article class="card offer stay clickable" data-open="${esc(o.id)}" tabindex="0" aria-label="Podrobnosti: ${esc(o.title)}">
-    <div class="thumb" style="background:linear-gradient(135deg, ${COVERS[d.continent]?.[0] || '#eee'}, ${COVERS[d.continent]?.[1] || '#f6f6f6'})">
-      <span class="fallback">${stayEmoji(o)}</span>
-      ${pic ? `<img src="${esc(pic)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : `<img class="illustr" src="${photoUrl(d.id)}" alt="" loading="lazy" onerror="this.remove()"><span class="thumb-emoji">${stayEmoji(o)}</span>`}
-      ${o.photos?.length > 1 ? `<span class="pill glass count">📷 ${o.photos.length}</span>` : ''}
+  const pics = o.photos?.length ? o.photos.slice(0, 5) : [];
+  return `<a class="bnb" href="${esc(o.deepLink)}" target="_blank" rel="noopener" aria-label="${esc(o.title)} na Airbnb">
+    <div class="bnb-photo" style="${cover(d.continent)}">
+      ${pics.length ? `<div class="bnb-strip">${pics.map((u) => `<img src="${esc(u)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">`).join('')}</div>`
+        : `${photo(d.id, stayEmoji(o), d.name, 640)}<span class="bnb-note">${o.mock ? 'Foto destinace · ukázková nabídka' : 'Bez fotky'}</span>`}
+      ${o.badges?.[0] ? `<span class="bnb-badge">${esc(o.badges[0])}</span>` : i === 0 ? '<span class="bnb-badge">Nejlevnější</span>' : ''}
+      <button class="bnb-heart" data-save="${esc(o.id)}" aria-label="Uložit do výletu">${icon('heart')}</button>
+      ${pics.length > 1 ? `<span class="bnb-dots">${pics.map((_, k) => `<i class="${k ? '' : 'on'}"></i>`).join('')}</span>` : ''}
     </div>
-    <div style="display:grid;gap:8px;min-width:0">
-      <div class="tagline"><span class="small muted">${icon('pin', 'sm')} ${esc(o.subtitle)}</span>${o.rating ? `<span class="rating"><span class="star">★</span>${o.rating}</span>` : ''}</div>
-      <h3>${esc(o.title)}</h3>
-      <div class="tags"><span class="pill sky">${esc(o.providerName)}</span>${i === 0 ? '<span class="pill coral">NEJLEVNĚJŠÍ</span>' : ''}${o.mock ? '<span class="pill">UKÁZKA</span>' : ''}${o.details.slice(0, 3).map((x) => `<span class="pill">${esc(x)}</span>`).join('')}</div>
-      <div class="offer-foot">
-        <div><div class="price">${czk(o.price)}</div><div class="small faint">${esc(o.priceNote)}</div></div>
-        <div class="actions">
-          <button class="btn glass sm" data-save="${esc(o.id)}">${icon('plus', 'sm')} Do výletu</button>
-          <a class="btn sm" href="${esc(o.deepLink)}" target="_blank" rel="noopener">Rezervovat ${icon('ext', 'sm')}</a>
-        </div>
-      </div>
+    <div class="bnb-body">
+      <div class="bnb-row"><b class="bnb-title">${esc(o.title)}</b><span class="bnb-rating">${ratingText(o)}</span></div>
+      <span class="bnb-sub">${esc(o.subtitle)}</span>
+      <span class="bnb-sub">${esc(o.details.slice(0, 3).join(' · '))}</span>
+      <div class="bnb-price">${o.oldPrice ? `<s>${czk(o.oldPrice)}</s> ` : ''}<b>${czk(o.price)}</b> celkem <span>· ${esc(o.priceNote.split('·')[0].trim())}</span></div>
+      <span class="bnb-open">${o.direct ? 'Otevřít inzerát na Airbnb' : 'Hledat na Airbnb v tomto místě'} ${icon('ext', 'sm')}</span>
     </div>
-  </article>`;
+  </a>`;
 }
 
 // ---------- Okružní cesta ----------
@@ -850,7 +839,7 @@ async function viewRoundtrip() {
             ${h ? `<div class="amount"><div class="price">${czk(h.price)}</div><span class="small faint">${esc(h.priceNote.split('·')[0])}</span></div>` : ''}
           </div>
           ${st.options.length ? `<div class="opts">${st.options.map((x, k) => `<button class="opt" data-stay="${i}" data-k="${k}" aria-pressed="${k === sel.stays[i]}"><span>${stayEmoji(x)} ${esc(x.title.length > 26 ? `${x.title.slice(0, 24)}…` : x.title)}</span><b>${czk(x.price)}</b><small>${esc(x.providerName)}${x.rating ? ` · ★ ${x.rating}` : ''}</small></button>`).join('')}
-            ${h ? `<button class="opt more" data-detail-stay="${i}">Detail ubytování →</button>` : ''}</div>` : ''}
+            ${h ? `<a class="opt more" href="${esc(h.deepLink)}" target="_blank" rel="noopener">Otevřít na Airbnb →</a>` : ''}</div>` : ''}
         </div></div>`;
     });
 
@@ -899,10 +888,6 @@ async function viewRoundtrip() {
       const leg = plan.legs[b.dataset.detailLeg];
       transportDetail(leg.options[sel.legs[b.dataset.detailLeg]], legCtx(leg), leg.to, () => toast('Celou trasu ulož tlačítkem „Uložit jako výlet“.'));
     }));
-    $app.querySelectorAll('[data-detail-stay]').forEach((b) => b.addEventListener('click', () => {
-      const st = plan.stays[b.dataset.detailStay];
-      lodgingDetail(st.options[sel.stays[b.dataset.detailStay]], { persons, nights: st.nights, from: st.from, to: st.to }, { ...st.place, continent: 'europe' }, () => toast('Celou trasu ulož tlačítkem „Uložit jako výlet“.'));
-    }));
     const pickBy = (fn) => {
       plan.legs.forEach((l, i) => { const best = [...l.options].sort(fn)[0]; sel.legs[i] = Math.max(0, l.options.indexOf(best)); });
       render();
@@ -948,6 +933,207 @@ function tripMapData(items) {
     }
   }
   return { points, segments };
+}
+
+// ---------- Prozkoumat: mapa s piny s fotkami ----------
+const EXPLORE_CATS = {
+  all: ['✨', 'Vše', '#1c1c1e'], nature: ['🌲', 'Příroda', '#34c759'], sight: ['🏰', 'Památky', '#ff9f0a'],
+  culture: ['🎭', 'Kultura', '#af52de'], other: ['📍', 'Ostatní', '#007aff'], dest: ['🧳', 'Destinace', '#ff5a5f'],
+};
+const exploreState = { cat: 'all', places: [], view: null };
+
+async function viewExplore() {
+  $app.innerHTML = `
+    <section class="explore">
+      <div class="explore-map" id="explore-map"></div>
+      <div class="explore-top">
+        <div class="glass-card explore-search ac-wrap">${icon('search')}<input id="ex-q" placeholder="Najdi místo, horu, město…"></div>
+        <div class="chips explore-cats">${Object.entries(EXPLORE_CATS).filter(([k]) => k !== 'dest').map(([k, [e, l]]) => `<button class="chip" data-cat="${k}" aria-pressed="${exploreState.cat === k}">${e} ${l}</button>`).join('')}</div>
+      </div>
+      <button class="btn glass sm locate" id="ex-locate">📍 Moje poloha</button>
+      <aside class="explore-panel" id="ex-panel"></aside>
+    </section>`;
+  const L = await loadLeaflet().catch(() => null);
+  const el = document.getElementById('explore-map');
+  if (!L || !el) { if (el) el.innerHTML = '<div class="map-fallback">Mapu se nepodařilo načíst.</div>'; return; }
+  const map = L.map(el, { zoomControl: false, worldCopyJump: true });
+  L.control.zoom({ position: 'bottomright' }).addTo(map);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+    subdomains: 'abcd', maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a> · místa: Wikipedie',
+  }).addTo(map);
+  // Panel zakrývá pravý (na mobilu spodní) okraj mapy – při posunech s tím počítáme.
+  const pad = () => (window.innerWidth >= 900 ? { paddingTopLeft: [20, 120], paddingBottomRight: [420, 20] } : { paddingTopLeft: [10, 110], paddingBottomRight: [10, Math.round(window.innerHeight * 0.46)] });
+  const v = exploreState.view;
+  if (v) map.setView(v.center, v.zoom); else map.fitBounds([[36, -10], [60, 30]], pad());
+  if ('ResizeObserver' in window) new ResizeObserver(() => map.invalidateSize()).observe(el);
+
+  map._tfPad = pad;
+  // Přelet tak, aby cíl nebyl schovaný pod panelem.
+  const flyPad = (lat, lng, zoom) => {
+    const off = window.innerWidth >= 900 ? [205, -40] : [0, Math.round(window.innerHeight * 0.2)];
+    const target = map.unproject(map.project([lat, lng], zoom).add(off), zoom);
+    map.flyTo(target, zoom, { duration: 0.8 });
+  };
+  const layer = L.layerGroup().addTo(map);
+  const routeLayer = L.layerGroup().addTo(map);
+  const panel = document.getElementById('ex-panel');
+  let seq = 0; let timer = 0;
+
+  const pin = (p) => {
+    const c = EXPLORE_CATS[p.category] || EXPLORE_CATS.other;
+    const img = p.thumb ? `<img src="${esc(p.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.replaceWith(document.createTextNode('${c[0]}'))">` : c[0];
+    return L.divIcon({ className: 'photo-pin', html: `<span style="--c:${c[2]}">${img}</span>`, iconSize: [46, 46], iconAnchor: [23, 23] });
+  };
+  const visible = () => exploreState.places.filter((p) => exploreState.cat === 'all' || p.category === exploreState.cat);
+
+  const renderList = () => {
+    if (panel.dataset.mode === 'detail') return;
+    const list = visible();
+    const zoomedOut = map.getZoom() < 9;
+    panel.dataset.mode = 'list';
+    panel.innerHTML = `<div class="panel-handle"></div>
+      <div class="panel-head"><div><span class="eyebrow">${zoomedOut ? 'Destinace' : 'V okolí'}</span><h3>${zoomedOut ? 'Přibliž mapu a uvidíš místa s fotkami' : plural(list.length, 'zajímavé místo', 'zajímavá místa', 'zajímavých míst')}</h3></div></div>
+      <div class="panel-list">${list.slice(0, 40).map((p) => `<button class="place-row" data-pid="${esc(p.id)}">
+        <span class="place-thumb" style="--c:${(EXPLORE_CATS[p.category] || EXPLORE_CATS.other)[2]}">${p.thumb ? `<img src="${esc(p.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : (EXPLORE_CATS[p.category] || EXPLORE_CATS.other)[0]}</span>
+        <span class="grow"><b>${esc(p.title)}</b><small>${esc(p.description || (EXPLORE_CATS[p.category] || EXPLORE_CATS.other)[1])}</small></span></button>`).join('')
+        || '<p class="small muted" style="padding:8px 4px">Tady nic nemáme – zkus jinou kategorii nebo posuň mapu.</p>'}</div>`;
+    panel.querySelectorAll('[data-pid]').forEach((b) => b.addEventListener('click', () => openPlace(exploreState.places.find((p) => p.id === b.dataset.pid))));
+  };
+  const renderPins = () => {
+    layer.clearLayers();
+    for (const p of visible()) L.marker([p.lat, p.lng], { icon: pin(p), riseOnHover: true }).on('click', () => openPlace(p)).addTo(layer);
+  };
+
+  const load = async () => {
+    exploreState.view = { center: map.getCenter(), zoom: map.getZoom() };
+    const my = ++seq;
+    if (map.getZoom() < 9) {
+      exploreState.places = state.all.map((d) => ({ id: `dest:${d.id}`, destId: d.id, title: d.name, description: d.country, lat: d.lat, lng: d.lng, category: 'dest', thumb: photoSrc(d.id, 320), emoji: d.emoji }));
+      renderPins(); renderList();
+      return;
+    }
+    panel.classList.add('loading');
+    try {
+      const c = map.getCenter();
+      const { places } = await api(`/explore?${new URLSearchParams({ lat: c.lat.toFixed(4), lng: c.lng.toFixed(4), radius: map.getZoom() >= 13 ? 3000 : 10000 })}`);
+      if (my !== seq) return;
+      exploreState.places = places;
+      renderPins(); renderList();
+    } catch (e) { toast(e.message); } finally { panel.classList.remove('loading'); }
+  };
+  map.on('moveend', () => { clearTimeout(timer); timer = setTimeout(load, 350); });
+
+  async function openPlace(p) {
+    if (!p) return;
+    if (p.destId) flyPad(p.lat, p.lng, 11);
+    panel.dataset.mode = 'detail';
+    panel.innerHTML = `<div class="panel-handle"></div><div class="place-detail"><div class="place-hero skeleton"></div><div class="skeleton" style="height:80px;margin-top:12px"></div></div>`;
+    let info = { title: p.title, description: p.description, extract: '', image: p.thumb, url: null };
+    if (!p.destId) {
+      const [lang] = p.id.split(':');
+      info = await api(`/explore/place?${new URLSearchParams({ lang, title: p.title })}`).catch(() => info) || info;
+    } else {
+      const d = state.all.find((x) => x.id === p.destId);
+      info = { title: d.name, description: d.country, extract: d.description, image: photoSrc(d.id, 960) };
+    }
+    const c = EXPLORE_CATS[p.category] || EXPLORE_CATS.other;
+    const geo = p.destId || `geo:${p.lat.toFixed(4)},${p.lng.toFixed(4)},,${p.title}`;
+    panel.innerHTML = `<div class="panel-handle"></div>
+      <div class="place-detail">
+        <div class="place-hero" style="${cover('europe')}">${info.image ? `<img src="${esc(info.image)}" alt="${esc(info.title)}" referrerpolicy="no-referrer" onload="this.classList.add('loaded')" onerror="this.remove()">` : ''}<div class="fallback">${p.emoji || c[0]}</div>
+          <button class="btn glass sm icon-only back-btn" id="ex-back" aria-label="Zpět na seznam">${icon('back', 'sm')}</button>
+          <span class="pill glass cat-pill" style="color:${c[2]}">${c[0]} ${c[1]}</span></div>
+        <h2>${esc(info.title)}</h2>
+        ${info.description ? `<p class="small muted">${esc(info.description)}</p>` : ''}
+        ${info.extract ? `<p class="extract">${esc(info.extract)}</p>` : ''}
+        <div class="place-actions">
+          <button class="btn" id="ex-nav">🧭 Navigovat sem</button>
+          <a class="btn glass" href="${dHref(geo)}">✈️ Naplánovat cestu</a>
+          ${info.url ? `<a class="btn ghost sm" href="${esc(info.url)}" target="_blank" rel="noopener">Wikipedie ${icon('ext', 'sm')}</a>` : ''}
+        </div>
+        <div id="ex-route"></div>
+      </div>`;
+    document.getElementById('ex-back').onclick = () => { panel.dataset.mode = 'list'; routeLayer.clearLayers(); renderList(); };
+    document.getElementById('ex-nav').onclick = () => navigateForm(document.getElementById('ex-route'), { lat: p.lat, lng: p.lng, name: info.title }, routeLayer, map);
+  }
+
+  document.querySelectorAll('[data-cat]').forEach((b) => b.addEventListener('click', () => {
+    exploreState.cat = b.dataset.cat;
+    document.querySelectorAll('[data-cat]').forEach((x) => x.setAttribute('aria-pressed', x === b));
+    renderPins(); panel.dataset.mode = 'list'; renderList();
+  }));
+  autocomplete(document.getElementById('ex-q'), { onSelect: (r) => flyPad(r.lat, r.lng, r.kind === 'address' ? 15 : 12) });
+  document.getElementById('ex-locate').onclick = () => myPosition().then((p) => flyPad(p.lat, p.lng, 13)).catch((e) => toast(e.message));
+  load();
+}
+
+const myPosition = () => new Promise((resolve, reject) => {
+  if (!navigator.geolocation) { reject(new Error('Prohlížeč neumí zjistit polohu.')); return; }
+  navigator.geolocation.getCurrentPosition((p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude, name: 'Moje poloha' }),
+    () => reject(new Error('Polohu se nepodařilo zjistit – povol ji v prohlížeči.')), { enableHighAccuracy: true, timeout: 10000 });
+});
+
+// Formulář „Navigovat sem“: odkud, pěšky / autem, trasa na mapě a pokyny po krocích.
+function navigateForm(box, to, routeLayer, map) {
+  let from = null; let mode = 'foot';
+  box.innerHTML = `<div class="nav-form">
+    <div class="dock-field ac-wrap"><label for="nav-from">Odkud</label><input id="nav-from" placeholder="Adresa, město… nebo moje poloha"></div>
+    <div class="segmented mode-toggle" role="group"><button data-mode="foot" aria-pressed="true">🥾 Pěšky</button><button data-mode="car" aria-pressed="false">🚗 Autem</button></div>
+    <button class="btn glass sm" id="nav-me">📍 Moje poloha</button>
+  </div><div id="nav-result"></div>`;
+  const km = (a, b) => 111 * Math.hypot(a.lat - b.lat, (a.lng - b.lng) * Math.cos((a.lat * Math.PI) / 180));
+  const run = async () => {
+    if (!from) return;
+    // Daleko na pěší túru – rovnou autem.
+    if (mode === 'foot' && km(from, to) > 40) {
+      mode = 'car';
+      box.querySelectorAll('[data-mode]').forEach((x) => x.setAttribute('aria-pressed', x.dataset.mode === 'car'));
+      toast('Je to přes 40 km, tak počítám trasu autem.');
+    }
+    const out = box.querySelector('#nav-result');
+    out.innerHTML = '<div class="skeleton" style="height:90px;margin-top:12px"></div>';
+    try {
+      const r = await api(`/directions?${new URLSearchParams({ from: `${from.lat},${from.lng}`, to: `${to.lat},${to.lng}`, mode })}`);
+      out.innerHTML = directionsHtml(r, from, to);
+      if (routeLayer && map) {
+        const L = window.L;
+        routeLayer.clearLayers();
+        const st = MODE_STYLE[mode === 'foot' ? 'walk' : 'car'];
+        L.polyline(r.geometry, { color: '#fff', weight: 9, opacity: 0.9 }).addTo(routeLayer);
+        const line = L.polyline(r.geometry, { color: st.color, weight: 5, dashArray: st.dash }).addTo(routeLayer);
+        L.marker([from.lat, from.lng], { icon: L.divIcon({ className: 'map-pin', html: '<span class="pin" style="--c:#007aff">A</span>', iconSize: [32, 32], iconAnchor: [16, 16] }) }).addTo(routeLayer);
+        L.marker([to.lat, to.lng], { icon: L.divIcon({ className: 'map-pin', html: '<span class="pin" style="--c:#ff5a5f">B</span>', iconSize: [32, 32], iconAnchor: [16, 16] }) }).addTo(routeLayer);
+        map.fitBounds(line.getBounds(), map._tfPad?.() || { padding: [60, 60] });
+      }
+    } catch (e) { out.innerHTML = `<p class="small muted" style="margin-top:10px">${esc(e.message)}</p>`; }
+  };
+  const useMe = () => myPosition().then((p) => { from = p; box.querySelector('#nav-from').value = 'Moje poloha'; run(); }).catch((e) => toast(e.message));
+  autocomplete(box.querySelector('#nav-from'), {
+    suggestions: () => [{ id: 'me', kind: 'me', name: 'Moje poloha', detail: 'Použít polohu telefonu', emoji: '📍' }],
+    onSelect: (r) => {
+      if (r.kind === 'me') { useMe(); return; }
+      from = { lat: r.lat, lng: r.lng, name: r.name };
+      run();
+    },
+  });
+  box.querySelector('#nav-me').onclick = useMe;
+  box.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => {
+    mode = b.dataset.mode;
+    box.querySelectorAll('[data-mode]').forEach((x) => x.setAttribute('aria-pressed', x === b));
+    run();
+  }));
+}
+
+function directionsHtml(r, from, to) {
+  const travel = r.mode === 'foot' ? 'walking' : 'driving';
+  const gmaps = `https://www.google.com/maps/dir/?api=1&origin=${from.lat},${from.lng}&destination=${to.lat},${to.lng}&travelmode=${travel}`;
+  return `<div class="nav-summary ${r.mode}">
+      <span class="big">${r.mode === 'foot' ? '🥾' : '🚗'}</span>
+      <div><b>${fmtMin(r.durationMin) || 'pár minut'}</b><span>${String(r.distanceKm).replace('.', ',')} km${r.approx ? ' · odhad vzdušnou čarou' : ''}</span></div>
+      <a class="btn sm" href="${gmaps}" target="_blank" rel="noopener">Spustit navigaci ${icon('ext', 'sm')}</a>
+    </div>
+    ${r.steps?.length ? `<ol class="steps">${r.steps.map((s) => `<li><span>${esc(s.text)}</span><small>${s.distanceM >= 1000 ? `${(s.distanceM / 1000).toFixed(1).replace('.', ',')} km` : `${s.distanceM} m`}</small></li>`).join('')}</ol>`
+      : `<p class="small faint" style="margin-top:8px">${r.approx ? 'Podrobnou trasu teď nešlo spočítat – navigace v Google Maps ji ukáže.' : ''}</p>`}`;
 }
 
 // ---------- Cestovatelský pas ----------
@@ -1308,7 +1494,8 @@ async function viewAccount() {
 async function init() {
   $app.innerHTML = `<div class="grid">${'<div class="skeleton" style="height:340px"></div>'.repeat(3)}</div>`;
   try {
-    const [meta, me, all] = await Promise.all([api('/meta'), api('/auth/me'), api('/destinations')]);
+    const [meta, me, all, photos] = await Promise.all([api('/meta'), api('/auth/me'), api('/destinations'), api('/photos').catch(() => ({}))]);
+    state.photos = photos;
     state.meta = meta;
     state.user = me.user;
     state.all = all.results;

@@ -47,9 +47,12 @@ test('nabídky dopravy a ubytování od více poskytovatelů', async () => {
   assert.equal(r.body.context.nights, 7);
   const tp = new Set(r.body.offers.transport.map((o) => o.providerId));
   const lp = new Set(r.body.offers.lodging.map((o) => o.providerId));
-  assert.ok(tp.size >= 3 && lp.size >= 3);
-  assert.ok(r.body.offers.lodging.some((o) => o.deepLink.includes('booking.com')));
-  assert.ok(r.body.offers.lodging.some((o) => o.deepLink.includes('airbnb')));
+  assert.ok(tp.size >= 3);
+  assert.deepEqual([...lp], ['airbnb'], 'ubytování jen z Airbnb');
+  assert.ok(r.body.offers.lodging.every((o) => o.deepLink.startsWith('https://www.airbnb.cz/')));
+  assert.ok(r.body.offers.transport.some((o) => o.mode === 'car'), 'možnost autem');
+  const near = await c('/destinations/' + encodeURIComponent('geo:50.0870,14.4210,CZ,Staroměstské náměstí') + '/offers?origin=' + encodeURIComponent('geo:50.0755,14.4378,CZ,Václavské náměstí'));
+  assert.ok(near.body.offers.transport.some((o) => o.mode === 'walk'), 'možnost pěšky');
   // deterministické ceny
   const r2 = await c('/destinations/barcelona/offers?from=2027-05-01&to=2027-05-08&persons=3');
   assert.deepEqual(r2.body.offers.lodging.map((o) => o.price), r.body.offers.lodging.map((o) => o.price));

@@ -237,8 +237,8 @@ export const MODE_STYLE = {
   flight: { color: '#ff5a5f', dash: '2 9', weight: 3, icon: '✈️', label: 'Let' },
   train: { color: '#007aff', dash: null, weight: 4, icon: '🚆', label: 'Vlak' },
   bus: { color: '#34c759', dash: '10 7', weight: 4, icon: '🚌', label: 'Autobus' },
-  car: { color: '#8e8e93', dash: '4 6', weight: 3, icon: '🚕', label: 'Transfer' },
-  walk: { color: '#af52de', dash: '1 6', weight: 3, icon: '🚶', label: 'Pěšky' },
+  car: { color: '#5856d6', dash: null, weight: 4, icon: '🚗', label: 'Autem' },
+  walk: { color: '#af52de', dash: '1 7', weight: 4, icon: '🥾', label: 'Pěšky' },
 };
 
 // Zakřivený oblouk (pro lety) – kvadratická Bézierova křivka.
@@ -272,7 +272,7 @@ export async function drawMap(el, { points = [], segments = [], legend = true } 
   for (const s of segments) {
     if (!s.from || !s.to) continue;
     const st = MODE_STYLE[s.mode] || MODE_STYLE.car;
-    const line = s.mode === 'flight' ? arc(s.from, s.to) : [s.from, s.to];
+    const line = s.path?.length > 1 ? s.path : s.mode === 'flight' ? arc(s.from, s.to) : [s.from, s.to];
     L.polyline(line, { color: '#fff', weight: st.weight + 4, opacity: 0.85 }).addTo(map);
     const pl = L.polyline(line, { color: st.color, weight: st.weight, dashArray: st.dash, lineCap: 'round' }).addTo(map);
     if (s.label) pl.bindTooltip(`${st.icon} ${esc(s.label)}`, { sticky: true });
@@ -302,7 +302,13 @@ export async function drawMap(el, { points = [], segments = [], legend = true } 
     });
     ctl.addTo(map);
   }
+  // Mapa v nově vykresleném / skrytém prvku: přepočítat velikost, jakmile ji prvek opravdu má.
   setTimeout(() => map.invalidateSize(), 60);
+  if ('ResizeObserver' in window) {
+    const ro = new ResizeObserver(() => map.invalidateSize());
+    ro.observe(el);
+    map.on('unload', () => ro.disconnect());
+  }
   return map;
 }
 

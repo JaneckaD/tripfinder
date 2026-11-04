@@ -4,4 +4,8 @@ import { createApp } from './app.js';
 const port = Number(process.env.PORT) || 3000;
 const db = await openDb();
 const app = createApp(db);
-app.listen(port, () => console.log(`TripFinder běží na http://localhost:${port}${db.remote ? ' (databáze Turso)' : ''}`));
+app.listen(port, () => {
+  console.log(`TripFinder běží na http://localhost:${port}${db.remote ? ' (databáze Turso)' : ''}`);
+  // Fotky destinací do mezipaměti hned po startu (na pozadí).
+  setTimeout(() => app.warmPhotos().catch(() => {}), 2000);
+});
