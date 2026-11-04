@@ -5,18 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>TripFinder</title>
   <meta name="description" content="Najdi výlet kdekoli na světě – doprava, ubytování a ceny na jednom místě.">
-  <meta name="theme-color" content="#0f5257">
+  <meta name="theme-color" content="#f8f9fa">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <header class="topbar">
-    <a class="brand" href="#/"><img src="/icons/icon.svg" alt="" width="28" height="28"> TripFinder</a>
-    <nav class="topnav" aria-label="Hlavní navigace">
-      <a href="#/" data-nav="search">Hledat</a>
-      <a href="#/trips" data-nav="trips">Moje výlety</a>
+    <a class="brand" href="#/"><img src="/icons/icon.svg" alt="" width="30" height="30"> TripFinder <span class="beta">BETA</span></a>
+    <nav class="segnav" aria-label="Hlavní navigace">
+      <a href="#/" data-nav="search">Objevovat</a>
+      <a href="#/trips" data-nav="trips">Můj plánovač</a>
     </nav>
     <div class="account" id="account"></div>
   </header>
@@ -24,9 +27,9 @@
   <main id="app" tabindex="-1"></main>
 
   <nav class="bottomnav" aria-label="Navigace">
-    <a href="#/" data-nav="search"><span aria-hidden="true">🔎</span>Hledat</a>
-    <a href="#/trips" data-nav="trips"><span aria-hidden="true">🧳</span>Výlety</a>
-    <a href="#/login" data-nav="account" id="bottom-account"><span aria-hidden="true">👤</span>Účet</a>
+    <a href="#/" data-nav="search"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16.2 7.8-2.1 6.3-6.3 2.1 2.1-6.3z"/></svg>Objevovat</a>
+    <a href="#/trips" data-nav="trips"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="3"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>Výlety</a>
+    <a href="#/login" data-nav="account" id="bottom-account"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Účet</a>
   </nav>
 
   <div id="modal-root"></div>

@@ -5,12 +5,14 @@ import { join } from 'node:path';
 import { COOKIE, createSession, hashPassword, loadUser, requireUser, sessionCookie, verifyPassword } from './auth.js';
 import { CONTINENTS, TAGS, findDestination, searchDestinations } from './data/destinations.js';
 import { createProviders } from './providers/index.js';
+import { createExtras } from './extras.js';
 
 const PUBLIC_DIR = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'public');
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function createApp(db, { secureCookies = process.env.NODE_ENV === 'production', env = process.env } = {}) {
   const providers = createProviders(db, env);
+  const extras = createExtras(db);
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '200kb' }));
@@ -65,6 +67,22 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
     res.json({ destination: dest, continentName: CONTINENTS[dest.continent], tagNames: dest.tags.map((t) => TAGS[t]) });
   });
 
+  // Fotka destinace (přesměrování na obrázek z Wikimedia Commons)
+  api.get('/destinations/:id/photo', async (req, res) => {
+    const dest = findDestination(req.params.id);
+    if (!dest) return bad(res, 'Destinace nenalezena.', 404);
+    const photo = await extras.photo(dest).catch(() => null);
+    if (!photo) return bad(res, 'Fotka není k dispozici.', 404);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.redirect(302, photo.url);
+  });
+
+  api.get('/destinations/:id/weather', async (req, res) => {
+    const dest = findDestination(req.params.id);
+    if (!dest) return bad(res, 'Destinace nenalezena.', 404);
+    try { res.json(await extras.weather(dest)); } catch { bad(res, 'Počasí teď není k dispozici.', 502); }
+  });
+
   api.get('/destinations/:id/offers', async (req, res) => {
     const dest = findDestination(req.params.id);
     if (!dest) return bad(res, 'Destinace nenalezena.', 404);
@@ -109,18 +127,19 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
       SELECT t.*, CASE WHEN t.owner_id = ? THEN 'owner' ELSE m.role END AS role,
         (SELECT COUNT(*) FROM trip_items i WHERE i.trip_id = t.id) AS item_count,
         (SELECT COALESCE(SUM(price), 0) FROM trip_items i WHERE i.trip_id = t.id) AS total,
-        (SELECT COUNT(*) FROM trip_members mm WHERE mm.trip_id = t.id) AS member_count
+        (SELECT COUNT(*) FROM trip_members mm WHERE mm.trip_id = t.id) AS member_count,
+        (SELECT data FROM trip_items i WHERE i.trip_id = t.id AND i.kind = 'destination' ORDER BY i.id LIMIT 1) AS cover_data
       FROM trips t LEFT JOIN trip_members m ON m.trip_id = t.id AND m.user_id = ?
       WHERE t.owner_id = ? OR m.user_id = ?
       ORDER BY t.updated_at DESC`, req.user.id, req.user.id, req.user.id, req.user.id);
-    res.json({ trips });
+    res.json({ trips: trips.map(({ cover_data, ...t }) => ({ ...t, cover: cover_data ? JSON.parse(cover_data).destinationId || null : null })) });
   });
 
   api.post('/trips', requireUser, async (req, res) => {
-    const { title, note = '', start_date = null, end_date = null, persons = 2 } = req.body || {};
+    const { title, note = '', start_date = null, end_date = null, persons = 2, budget = null } = req.body || {};
     if (!title?.trim()) return bad(res, 'Výlet potřebuje název.');
-    const { lastInsertRowid } = await db.run('INSERT INTO trips (owner_id, title, note, start_date, end_date, persons) VALUES (?, ?, ?, ?, ?, ?)',
-      req.user.id, title.trim().slice(0, 120), String(note).slice(0, 2000), start_date || null, end_date || null, Number(persons) || 2);
+    const { lastInsertRowid } = await db.run('INSERT INTO trips (owner_id, title, note, start_date, end_date, persons, budget) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      req.user.id, title.trim().slice(0, 120), String(note).slice(0, 2000), start_date || null, end_date || null, Number(persons) || 2, Number(budget) > 0 ? Number(budget) : null);
     const trip = await db.get('SELECT * FROM trips WHERE id = ?', lastInsertRowid);
     res.status(201).json(await tripDetail(trip, 'owner'));
   });
@@ -128,10 +147,11 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
   api.get('/trips/:id', requireUser, withTrip('viewer'), async (req, res) => res.json(await tripDetail(req.trip, req.role)));
 
   api.patch('/trips/:id', requireUser, withTrip('editor'), async (req, res) => {
-    const t = { ...req.trip, ...pickFields(req.body, ['title', 'note', 'start_date', 'end_date', 'persons']) };
+    const t = { ...req.trip, ...pickFields(req.body, ['title', 'note', 'start_date', 'end_date', 'persons', 'budget']) };
     if (!String(t.title || '').trim()) return bad(res, 'Výlet potřebuje název.');
-    await db.run(`UPDATE trips SET title = ?, note = ?, start_date = ?, end_date = ?, persons = ?, updated_at = datetime('now') WHERE id = ?`,
-      String(t.title).trim().slice(0, 120), String(t.note || '').slice(0, 2000), t.start_date || null, t.end_date || null, Number(t.persons) || 1, t.id);
+    const budget = Number(t.budget) > 0 ? Number(t.budget) : null;
+    await db.run(`UPDATE trips SET title = ?, note = ?, start_date = ?, end_date = ?, persons = ?, budget = ?, updated_at = datetime('now') WHERE id = ?`,
+      String(t.title).trim().slice(0, 120), String(t.note || '').slice(0, 2000), t.start_date || null, t.end_date || null, Number(t.persons) || 1, budget, t.id);
     res.json(await tripDetail(await db.get('SELECT * FROM trips WHERE id = ?', t.id), req.role));
   });
 
