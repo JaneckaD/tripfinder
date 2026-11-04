@@ -6,13 +6,19 @@ PWA pro hledání a plánování výletů po celém světě: destinace podle kon
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/JaneckaD/tripfinder)
 
-Klikni na tlačítko, přihlas se na Render přes GitHub a potvrď. Render se zeptá na API klíče (můžeš je nechat prázdné) a za pár minut dostaneš adresu typu `https://tripfinder-xxxx.onrender.com`. Každé sloučení do `main` se nasadí samo.
+Nejdřív si založ bezplatnou databázi **Turso**, aby se účty a výlety neztrácely (disk na bezplatném Renderu se při každém uspání smaže):
+
+1. Zaregistruj se na [turso.tech](https://turso.tech) (přes GitHub, zdarma).
+2. *Databases → Create Database*, název třeba `tripfinder`, region nejblíž (např. Frankfurt).
+3. U databáze zkopíruj **URL** (`libsql://tripfinder-….turso.io`) a vytvoř token (*Create Token*, bez expirace).
+
+Pak klikni na tlačítko, přihlas se na Render přes GitHub a potvrď. Render se zeptá na `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` a API klíče (ty můžeš nechat prázdné) a za pár minut dostaneš adresu typu `https://tripfinder-xxxx.onrender.com`. Každé sloučení do `main` se nasadí samo.
 
 Bezplatný tarif po 15 minutách nečinnosti usne a první načtení pak trvá asi 30 až 60 sekund.
 
 ## Spuštění
 
-Potřebuješ **Node.js 22.13+** (kvůli vestavěné SQLite databázi).
+Potřebuješ **Node.js 22+**. Lokálně se data ukládají do souboru `data/tripfinder.db`, s proměnnými `TURSO_DATABASE_URL` a `TURSO_AUTH_TOKEN` do cloudové databáze Turso.
 
 ```bash
 npm install
@@ -49,7 +55,7 @@ Proměnné prostředí:
 server/
   index.js            start serveru
   app.js              Express API + servírování PWA
-  db.js               SQLite schéma (users, sessions, trips, trip_items, trip_members)
+  db.js               databáze libSQL/Turso a schéma (users, sessions, trips, trip_items, trip_members)
   auth.js             hesla, sessions, middleware
   data/destinations.js  katalog destinací + odhad ceny
   providers/

@@ -68,7 +68,7 @@ export function createProviders(db, env = process.env) {
         id, name, kind, website, offers, mode: mode === 'mock' && hasLive(kind) ? 'link' : mode,
       }));
     },
-    serpapiUsage: () => (env.SERPAPI_KEY ? { used: quota.used('serpapi'), limit: monthlyLimit } : null),
+    serpapiUsage: async () => (env.SERPAPI_KEY ? { used: await quota.used('serpapi'), limit: monthlyLimit } : null),
 
     async search(dest, params) {
       const ctx = buildSearchContext(dest, params);

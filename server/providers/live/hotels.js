@@ -68,7 +68,7 @@ export function serpHotelsProvider({ apiKey, cached, quota, monthlyLimit }) {
       const { dest, from, to, persons, nights } = ctx;
       const { city } = liveMeta(dest);
       const res = await cached(`serp-hotels:${city}:${from}:${to}:${persons}`, 24 * HOUR, async () => {
-        quota.take('serpapi', monthlyLimit);
+        await quota.take('serpapi', monthlyLimit);
         return getJson(`https://serpapi.com/search.json?${new URLSearchParams({
           engine: 'google_hotels', q: `${city} hotels`, check_in_date: from, check_out_date: to,
           adults: String(persons), currency: 'CZK', hl: 'cs', gl: 'cz', api_key: apiKey,

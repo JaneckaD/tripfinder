@@ -7,7 +7,7 @@ let server;
 let base;
 
 before(async () => {
-  server = createApp(openDb(':memory:')).listen(0);
+  server = createApp(await openDb({ path: ':memory:', url: '' })).listen(0);
   await new Promise((r) => server.once('listening', r));
   base = `http://localhost:${server.address().port}/api`;
 });

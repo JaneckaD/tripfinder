@@ -20,32 +20,31 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
   const bad = (res, msg, code = 400) => res.status(code).json({ error: msg });
 
   // ---------- Přihlášení ----------
-  api.post('/auth/register', (req, res) => {
+  api.post('/auth/register', async (req, res) => {
     const { email, password, name } = req.body || {};
     if (!EMAIL_RE.test(email || '')) return bad(res, 'Zadej platný e-mail.');
     if (!password || password.length < 8) return bad(res, 'Heslo musí mít aspoň 8 znaků.');
-    if (db.prepare('SELECT 1 FROM users WHERE email = ?').get(email)) return bad(res, 'Účet s tímto e-mailem už existuje.', 409);
-    const { lastInsertRowid: id } = db
-      .prepare('INSERT INTO users (email, name, password_hash) VALUES (?, ?, ?)')
-      .run(email.trim(), (name || email.split('@')[0]).trim().slice(0, 80), hashPassword(password));
+    if (await db.get('SELECT 1 FROM users WHERE email = ?', email.trim())) return bad(res, 'Účet s tímto e-mailem už existuje.', 409);
+    const { lastInsertRowid: id } = await db.run('INSERT INTO users (email, name, password_hash) VALUES (?, ?, ?)',
+      email.trim(), (name || email.split('@')[0]).trim().slice(0, 80), hashPassword(password));
     // Připojí pozvánky na výlety, které čekaly na tento e-mail.
-    db.prepare('UPDATE trip_members SET user_id = ? WHERE email = ? AND user_id IS NULL').run(id, email.trim());
-    const s = createSession(db, id);
+    await db.run('UPDATE trip_members SET user_id = ? WHERE email = ? AND user_id IS NULL', id, email.trim());
+    const s = await createSession(db, id);
     res.setHeader('Set-Cookie', sessionCookie(s.token, s.expires, secureCookies));
-    res.status(201).json({ user: db.prepare('SELECT id, email, name FROM users WHERE id = ?').get(id) });
+    res.status(201).json({ user: await db.get('SELECT id, email, name FROM users WHERE id = ?', id) });
   });
 
-  api.post('/auth/login', (req, res) => {
+  api.post('/auth/login', async (req, res) => {
     const { email, password } = req.body || {};
-    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email || '');
+    const user = await db.get('SELECT * FROM users WHERE email = ?', String(email || '').trim());
     if (!user || !verifyPassword(password || '', user.password_hash)) return bad(res, 'Špatný e-mail nebo heslo.', 401);
-    const s = createSession(db, user.id);
+    const s = await createSession(db, user.id);
     res.setHeader('Set-Cookie', sessionCookie(s.token, s.expires, secureCookies));
     res.json({ user: { id: user.id, email: user.email, name: user.name } });
   });
 
-  api.post('/auth/logout', (req, res) => {
-    if (req.sessionToken) db.prepare('DELETE FROM sessions WHERE token = ?').run(req.sessionToken);
+  api.post('/auth/logout', async (req, res) => {
+    if (req.sessionToken) await db.run('DELETE FROM sessions WHERE token = ?', req.sessionToken);
     res.setHeader('Set-Cookie', sessionCookie('', null, secureCookies));
     res.json({ ok: true });
   });
@@ -53,7 +52,7 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
   api.get('/auth/me', (req, res) => res.json({ user: req.user }));
 
   // ---------- Vyhledávání ----------
-  api.get('/meta', (_req, res) => res.json({ continents: CONTINENTS, tags: TAGS, providers: providers.list(), serpapi: providers.serpapiUsage() }));
+  api.get('/meta', async (_req, res) => res.json({ continents: CONTINENTS, tags: TAGS, providers: providers.list(), serpapi: await providers.serpapiUsage() }));
 
   api.get('/destinations', (req, res) => {
     const { continent, q, tags, maxBudget, persons, nights, month, sort } = req.query;
@@ -75,16 +74,16 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
   });
 
   // ---------- Výlety ----------
-  const tripRole = (tripId, userId) => {
-    const trip = db.prepare('SELECT * FROM trips WHERE id = ?').get(tripId);
+  const tripRole = async (tripId, userId) => {
+    const trip = await db.get('SELECT * FROM trips WHERE id = ?', tripId);
     if (!trip) return { trip: null, role: null };
     if (trip.owner_id === userId) return { trip, role: 'owner' };
-    const m = db.prepare('SELECT role FROM trip_members WHERE trip_id = ? AND user_id = ?').get(tripId, userId);
+    const m = await db.get('SELECT role FROM trip_members WHERE trip_id = ? AND user_id = ?', tripId, userId);
     return { trip, role: m?.role || null };
   };
 
-  const withTrip = (minRole) => (req, res, next) => {
-    const { trip, role } = tripRole(Number(req.params.id), req.user.id);
+  const withTrip = (minRole) => async (req, res, next) => {
+    const { trip, role } = await tripRole(Number(req.params.id) || 0, req.user.id);
     if (!trip || !role) return bad(res, 'Výlet nenalezen.', 404);
     const rank = { viewer: 1, editor: 2, owner: 3 };
     if (rank[role] < rank[minRole]) return bad(res, 'Na tuto akci nemáš oprávnění.', 403);
@@ -93,104 +92,110 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
     next();
   };
 
-  const tripDetail = (trip, role) => {
-    const items = db.prepare('SELECT * FROM trip_items WHERE trip_id = ? ORDER BY created_at, id').all(trip.id)
-      .map((it) => ({ ...it, data: JSON.parse(it.data) }));
-    const members = db.prepare(`
-      SELECT m.id, m.email, m.role, m.user_id, u.name FROM trip_members m
-      LEFT JOIN users u ON u.id = m.user_id WHERE m.trip_id = ? ORDER BY m.id`).all(trip.id);
-    const owner = db.prepare('SELECT id, name, email FROM users WHERE id = ?').get(trip.owner_id);
+  const tripDetail = async (trip, role) => {
+    const [itemRows, members, owner] = await Promise.all([
+      db.all('SELECT * FROM trip_items WHERE trip_id = ? ORDER BY created_at, id', trip.id),
+      db.all(`SELECT m.id, m.email, m.role, m.user_id, u.name FROM trip_members m
+        LEFT JOIN users u ON u.id = m.user_id WHERE m.trip_id = ? ORDER BY m.id`, trip.id),
+      db.get('SELECT id, name, email FROM users WHERE id = ?', trip.owner_id),
+    ]);
+    const items = itemRows.map((it) => ({ ...it, data: JSON.parse(it.data) }));
     const total = items.reduce((sum, it) => sum + (it.price || 0), 0);
     return { trip: { ...trip, share_token: role === 'owner' ? trip.share_token : undefined }, role, owner, items, members, total };
   };
 
-  api.get('/trips', requireUser, (req, res) => {
-    const trips = db.prepare(`
+  api.get('/trips', requireUser, async (req, res) => {
+    const trips = await db.all(`
       SELECT t.*, CASE WHEN t.owner_id = ? THEN 'owner' ELSE m.role END AS role,
         (SELECT COUNT(*) FROM trip_items i WHERE i.trip_id = t.id) AS item_count,
         (SELECT COALESCE(SUM(price), 0) FROM trip_items i WHERE i.trip_id = t.id) AS total,
         (SELECT COUNT(*) FROM trip_members mm WHERE mm.trip_id = t.id) AS member_count
       FROM trips t LEFT JOIN trip_members m ON m.trip_id = t.id AND m.user_id = ?
       WHERE t.owner_id = ? OR m.user_id = ?
-      ORDER BY t.updated_at DESC`).all(req.user.id, req.user.id, req.user.id, req.user.id);
+      ORDER BY t.updated_at DESC`, req.user.id, req.user.id, req.user.id, req.user.id);
     res.json({ trips });
   });
 
-  api.post('/trips', requireUser, (req, res) => {
+  api.post('/trips', requireUser, async (req, res) => {
     const { title, note = '', start_date = null, end_date = null, persons = 2 } = req.body || {};
     if (!title?.trim()) return bad(res, 'Výlet potřebuje název.');
-    const { lastInsertRowid } = db
-      .prepare('INSERT INTO trips (owner_id, title, note, start_date, end_date, persons) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(req.user.id, title.trim().slice(0, 120), String(note).slice(0, 2000), start_date || null, end_date || null, Number(persons) || 2);
-    const trip = db.prepare('SELECT * FROM trips WHERE id = ?').get(lastInsertRowid);
-    res.status(201).json(tripDetail(trip, 'owner'));
+    const { lastInsertRowid } = await db.run('INSERT INTO trips (owner_id, title, note, start_date, end_date, persons) VALUES (?, ?, ?, ?, ?, ?)',
+      req.user.id, title.trim().slice(0, 120), String(note).slice(0, 2000), start_date || null, end_date || null, Number(persons) || 2);
+    const trip = await db.get('SELECT * FROM trips WHERE id = ?', lastInsertRowid);
+    res.status(201).json(await tripDetail(trip, 'owner'));
   });
 
-  api.get('/trips/:id', requireUser, withTrip('viewer'), (req, res) => res.json(tripDetail(req.trip, req.role)));
+  api.get('/trips/:id', requireUser, withTrip('viewer'), async (req, res) => res.json(await tripDetail(req.trip, req.role)));
 
-  api.patch('/trips/:id', requireUser, withTrip('editor'), (req, res) => {
+  api.patch('/trips/:id', requireUser, withTrip('editor'), async (req, res) => {
     const t = { ...req.trip, ...pickFields(req.body, ['title', 'note', 'start_date', 'end_date', 'persons']) };
     if (!String(t.title || '').trim()) return bad(res, 'Výlet potřebuje název.');
-    db.prepare(`UPDATE trips SET title = ?, note = ?, start_date = ?, end_date = ?, persons = ?, updated_at = datetime('now') WHERE id = ?`)
-      .run(String(t.title).trim().slice(0, 120), String(t.note || '').slice(0, 2000), t.start_date || null, t.end_date || null, Number(t.persons) || 1, t.id);
-    res.json(tripDetail(db.prepare('SELECT * FROM trips WHERE id = ?').get(t.id), req.role));
+    await db.run(`UPDATE trips SET title = ?, note = ?, start_date = ?, end_date = ?, persons = ?, updated_at = datetime('now') WHERE id = ?`,
+      String(t.title).trim().slice(0, 120), String(t.note || '').slice(0, 2000), t.start_date || null, t.end_date || null, Number(t.persons) || 1, t.id);
+    res.json(await tripDetail(await db.get('SELECT * FROM trips WHERE id = ?', t.id), req.role));
   });
 
-  api.delete('/trips/:id', requireUser, withTrip('owner'), (req, res) => {
-    db.prepare('DELETE FROM trips WHERE id = ?').run(req.trip.id);
+  api.delete('/trips/:id', requireUser, withTrip('owner'), async (req, res) => {
+    await db.batch([
+      ['DELETE FROM trip_items WHERE trip_id = ?', req.trip.id],
+      ['DELETE FROM trip_members WHERE trip_id = ?', req.trip.id],
+      ['DELETE FROM trips WHERE id = ?', req.trip.id],
+    ]);
     res.json({ ok: true });
   });
 
   // Položky výletu (uložená destinace / doprava / ubytování / poznámka)
-  api.post('/trips/:id/items', requireUser, withTrip('editor'), (req, res) => {
+  api.post('/trips/:id/items', requireUser, withTrip('editor'), async (req, res) => {
     const { kind, data } = req.body || {};
     if (!['destination', 'transport', 'lodging', 'note'].includes(kind)) return bad(res, 'Neznámý typ položky.');
     if (!data || typeof data !== 'object') return bad(res, 'Chybí data položky.');
     const price = Number.isFinite(Number(data.price)) && kind !== 'destination' ? Number(data.price) : null;
-    db.prepare('INSERT INTO trip_items (trip_id, kind, data, price, currency, added_by) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(req.trip.id, kind, JSON.stringify(data).slice(0, 20000), price, data.currency || (price != null ? 'CZK' : null), req.user.id);
-    db.prepare(`UPDATE trips SET updated_at = datetime('now') WHERE id = ?`).run(req.trip.id);
-    res.status(201).json(tripDetail(req.trip, req.role));
+    await db.batch([
+      ['INSERT INTO trip_items (trip_id, kind, data, price, currency, added_by) VALUES (?, ?, ?, ?, ?, ?)',
+        req.trip.id, kind, JSON.stringify(data).slice(0, 20000), price, data.currency || (price != null ? 'CZK' : null), req.user.id],
+      [`UPDATE trips SET updated_at = datetime('now') WHERE id = ?`, req.trip.id],
+    ]);
+    res.status(201).json(await tripDetail(req.trip, req.role));
   });
 
-  api.delete('/trips/:id/items/:itemId', requireUser, withTrip('editor'), (req, res) => {
-    db.prepare('DELETE FROM trip_items WHERE id = ? AND trip_id = ?').run(Number(req.params.itemId), req.trip.id);
-    res.json(tripDetail(req.trip, req.role));
+  api.delete('/trips/:id/items/:itemId', requireUser, withTrip('editor'), async (req, res) => {
+    await db.run('DELETE FROM trip_items WHERE id = ? AND trip_id = ?', Number(req.params.itemId) || 0, req.trip.id);
+    res.json(await tripDetail(req.trip, req.role));
   });
 
   // Spolucestující
-  api.post('/trips/:id/members', requireUser, withTrip('owner'), (req, res) => {
+  api.post('/trips/:id/members', requireUser, withTrip('owner'), async (req, res) => {
     const { email, role = 'editor' } = req.body || {};
     if (!EMAIL_RE.test(email || '')) return bad(res, 'Zadej platný e-mail spolucestujícího.');
     if (!['editor', 'viewer'].includes(role)) return bad(res, 'Neplatná role.');
     if (email.trim().toLowerCase() === req.user.email.toLowerCase()) return bad(res, 'Sebe přidávat nemusíš, výlet je tvůj.');
-    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email.trim());
-    db.prepare(`INSERT INTO trip_members (trip_id, user_id, email, role) VALUES (?, ?, ?, ?)
-      ON CONFLICT(trip_id, email) DO UPDATE SET role = excluded.role`).run(req.trip.id, existing?.id ?? null, email.trim(), role);
-    res.status(201).json(tripDetail(req.trip, req.role));
+    const existing = await db.get('SELECT id FROM users WHERE email = ?', email.trim());
+    await db.run(`INSERT INTO trip_members (trip_id, user_id, email, role) VALUES (?, ?, ?, ?)
+      ON CONFLICT(trip_id, email) DO UPDATE SET role = excluded.role`, req.trip.id, existing?.id ?? null, email.trim(), role);
+    res.status(201).json(await tripDetail(req.trip, req.role));
   });
 
-  api.delete('/trips/:id/members/:memberId', requireUser, withTrip('viewer'), (req, res) => {
-    const m = db.prepare('SELECT * FROM trip_members WHERE id = ? AND trip_id = ?').get(Number(req.params.memberId), req.trip.id);
+  api.delete('/trips/:id/members/:memberId', requireUser, withTrip('viewer'), async (req, res) => {
+    const m = await db.get('SELECT * FROM trip_members WHERE id = ? AND trip_id = ?', Number(req.params.memberId) || 0, req.trip.id);
     if (!m) return bad(res, 'Spolucestující nenalezen.', 404);
     // Vlastník může odebrat kohokoli, člen může odejít sám.
     if (req.role !== 'owner' && m.user_id !== req.user.id) return bad(res, 'Na tuto akci nemáš oprávnění.', 403);
-    db.prepare('DELETE FROM trip_members WHERE id = ?').run(m.id);
-    res.json(req.role === 'owner' ? tripDetail(req.trip, req.role) : { ok: true, left: true });
+    await db.run('DELETE FROM trip_members WHERE id = ?', m.id);
+    res.json(req.role === 'owner' ? await tripDetail(req.trip, req.role) : { ok: true, left: true });
   });
 
   // Sdílení odkazem (jen ke čtení)
-  api.post('/trips/:id/share', requireUser, withTrip('owner'), (req, res) => {
+  api.post('/trips/:id/share', requireUser, withTrip('owner'), async (req, res) => {
     const enabled = req.body?.enabled !== false;
     const token = enabled ? req.trip.share_token || randomBytes(12).toString('base64url') : null;
-    db.prepare('UPDATE trips SET share_token = ? WHERE id = ?').run(token, req.trip.id);
+    await db.run('UPDATE trips SET share_token = ? WHERE id = ?', token, req.trip.id);
     res.json({ share_token: token });
   });
 
-  api.get('/shared/:token', (req, res) => {
-    const trip = db.prepare('SELECT * FROM trips WHERE share_token = ?').get(req.params.token);
+  api.get('/shared/:token', async (req, res) => {
+    const trip = await db.get('SELECT * FROM trips WHERE share_token = ?', req.params.token);
     if (!trip) return bad(res, 'Sdílený výlet neexistuje nebo už není sdílený.', 404);
-    const detail = tripDetail(trip, 'viewer');
+    const detail = await tripDetail(trip, 'viewer');
     detail.members = detail.members.map((m) => ({ name: m.name || m.email.split('@')[0], role: m.role }));
     detail.owner = { name: detail.owner.name };
     res.json(detail);
