@@ -2,6 +2,14 @@
 
 PWA pro hledání a plánování výletů po celém světě: destinace podle kontinentu a filtrů, doprava a ubytování od více poskytovatelů s porovnáním cen, účty, ukládání více výletů, spolucestující a sdílení odkazem.
 
+## Nasazení na internet
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/JaneckaD/tripfinder)
+
+Klikni na tlačítko, přihlas se na Render přes GitHub a potvrď. Render se zeptá na API klíče (můžeš je nechat prázdné) a za pár minut dostaneš adresu typu `https://tripfinder-xxxx.onrender.com`. Každé sloučení do `main` se nasadí samo.
+
+Bezplatný tarif po 15 minutách nečinnosti usne a první načtení pak trvá asi 30 až 60 sekund.
+
 ## Spuštění
 
 Potřebuješ **Node.js 22.13+** (kvůli vestavěné SQLite databázi).

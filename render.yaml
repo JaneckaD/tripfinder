@@ -1,0 +1,23 @@
+# Nasazení na Render.com (bezplatný tarif). Klikni na tlačítko „Deploy to Render“ v README.
+services:
+  - type: web
+    name: tripfinder
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/meta
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      # Klíče k API – Render se na ně zeptá při nasazení (můžeš nechat prázdné).
+      - key: TRAVELPAYOUTS_TOKEN
+        sync: false
+      - key: TRAVELPAYOUTS_MARKER
+        sync: false
+      - key: SERPAPI_KEY
+        sync: false
+      - key: LITEAPI_KEY
+        sync: false
