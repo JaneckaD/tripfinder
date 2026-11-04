@@ -829,3 +829,46 @@ body[data-view="explore"] .bottomnav { z-index: 40; }
 .trend-row small { color: var(--text-3); font-size: 11px; margin-top: 2px; }
 .leaflet-control-layers { border-radius: 14px !important; border: 0 !important; box-shadow: var(--shadow-2) !important; font: 13px var(--font); }
 label .muted { text-transform: none; font-weight: 500; letter-spacing: 0; }
+
+/* ---------- Dotykové mapy: posun dvěma prsty ---------- */
+.map-hint { position: absolute; inset: 0; z-index: 1000; display: grid; place-items: center; background: rgba(28, 28, 30, .45); color: #fff; font-weight: 700; font-size: 15px; opacity: 0; pointer-events: none; transition: opacity .25s; }
+.map-hint span { background: rgba(0, 0, 0, .55); padding: 10px 16px; border-radius: 999px; }
+.two-finger.hint-on .map-hint { opacity: 1; }
+
+/* ---------- Razítka v pasu nejsou odkazy ---------- */
+.stamp { cursor: default; user-select: none; -webkit-user-select: none; }
+.stamp:hover { transform: rotate(var(--rot, 0deg)); }
+
+/* ---------- Dokončené výlety: ztmavené ---------- */
+.trip-card.done { filter: grayscale(.65) brightness(.88); opacity: .78; }
+.trip-card.done:hover { filter: grayscale(.3) brightness(.95); opacity: .95; }
+.trip-card.done .media::after { content: ""; position: absolute; inset: 0; background: rgba(28, 28, 30, .28); border-radius: inherit; }
+.trip-card .media .badges { z-index: 2; }
+
+/* ---------- Formuláře: nic nepřetéká na úzkém displeji ---------- */
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.two > *, form > *, .grid > *, .detail-grid > *, .offers > * { min-width: 0; }
+input, select, textarea { max-width: 100%; min-width: 0; }
+input[type="date"] { width: 100%; }
+@media (max-width: 599px) {
+  .two { grid-template-columns: 1fr; }
+  .auth, .welcome { padding: 22px 18px; margin: 16px auto; }
+  .profile-edit { padding: 20px 16px; }
+  .chips.wrap select { min-width: 0; width: 100%; }
+  .age-out { padding-bottom: 0; }
+}
+.dock-tabs .short { display: none; }
+@media (max-width: 599px) {
+  .dock-tabs { display: flex; width: 100%; max-width: 100%; }
+  .dock-tabs button { flex: 1; justify-content: center; white-space: nowrap; padding-left: 10px; padding-right: 10px; }
+  .dock-tabs button > span:not(.short) { display: none; }
+  .dock-tabs .short { display: inline; }
+}
+@media (max-width: 599px) {
+  .offer .amount { flex: none; max-width: 48%; }
+  .offer .amount .price { font-size: 20px; white-space: nowrap; }
+  .offer .amount .small { font-size: 11px; line-height: 15px; }
+  .offer-foot { flex-wrap: wrap; gap: 10px; }
+  .offer-foot .actions { width: 100%; justify-content: space-between; }
+}
+.offer > *, .card > * { min-width: 0; }
