@@ -1,6 +1,6 @@
 // TripFinder – frontend (vanilla JS, bez build kroku). Jednoduchý hash router.
 import { setupSocial, loadProfile, profileBlock, profileHints, ageDiscount, applyHomeOrigin, refreshBadge, viewWelcome, viewChat, viewInvite } from './social.js';
-import { ms, autocomplete, calendar, guestsPicker, drawMap, loadLeaflet, baseTiles, stampSvg, touchMapOptions, twoFingerHint, MODE_STYLE, POPULAR_ORIGINS, shortDate, closePopover } from './widgets.js';
+import { ms, autocomplete, calendar, guestsPicker, drawMap, loadLeaflet, baseTiles, stampSvg, touchMapOptions, twoFingerHint, MODE_STYLE, POPULAR_ORIGINS, shortDate, closePopover, pickImages, imageToDataUrl } from './widgets.js';
 
 const $app = document.getElementById('app');
 const state = { user: undefined, meta: null, all: [], photos: {}, search: loadSearch(), roundtrip: loadRoundtrip() };
@@ -21,6 +21,11 @@ const fmtRange = (a, b) => (a ? `${fmtDate(a, { day: 'numeric', month: 'numeric'
 const plural = (n, one, few, many) => `${n} ${n === 1 ? one : n > 1 && n < 5 ? few : many}`;
 const AVATAR_TONES = ['', 'sky', 'gold', 'lav'];
 const initials = (name = '?') => name.replace(/\(.*?\)/g, '').split(/[^\p{L}\p{N}]+/u).filter(Boolean).map((p) => p[0]).join('').slice(0, 2).toUpperCase() || '?';
+// Profilová fotka (nebo iniciály)
+const avatarHtml = (u, cls = '') => (u?.id && u.avatar_v
+  ? `<span class="avatar photo ${cls}" title="${esc(u.name || '')}"><img src="/api/avatar/${u.id}?v=${u.avatar_v}" alt="" loading="lazy"></span>`
+  : `<span class="avatar ${cls}" title="${esc(u?.name || '')}">${esc(initials(u?.name || '?'))}</span>`);
+
 
 const icon = (name, cls = '') => ms(name, cls);
 const enc = encodeURIComponent;
@@ -144,7 +149,7 @@ function renderAccount() {
   const el = document.getElementById('account');
   const bottom = document.getElementById('bottom-account');
   el.innerHTML = `<button class="btn sm hdr-new" data-new-trip>${ms('add', 'sm')} Vytvořit výlet</button>${state.user
-    ? `<a class="avatar me" href="#/account" title="${esc(state.user.name)}" aria-label="Můj profil">${esc(initials(state.user.name))}</a>`
+    ? `<a class="avatar me${state.user.avatar_v ? ' photo' : ''}" href="#/account" title="${esc(state.user.name)}" aria-label="Můj profil">${state.user.avatar_v ? `<img src="/api/avatar/${state.user.id}?v=${state.user.avatar_v}" alt="">` : esc(initials(state.user.name))}</a>`
     : `<a class="avatar me" href="#/login" title="Přihlásit se" aria-label="Přihlásit se">${ms('person')}</a>`}`;
   bottom.href = state.user ? '#/account' : '#/login';
 }
@@ -1002,21 +1007,26 @@ async function viewRoundtrip() {
 }
 
 // ---------- Mapa výletu ----------
+// Barvy kategorií na mapě (jako Apple Mapy: barevný kroužek s bílou ikonou)
+const CAT_COLOR = { transport: '#0a84ff', lodging: '#ff375f', sight: '#bf5af2', food: '#ff9f0a', activity: '#30d158', destination: '#111111' };
 function tripMapData(items) {
   const points = []; const segments = [];
-  let n = 0;
   for (const it of items) {
     const d = it.data;
     if (it.kind === 'destination') {
       const cat = state.all.find((x) => x.id === d.destinationId);
       const lat = d.lat ?? cat?.lat; const lng = d.lng ?? cat?.lng;
-      if (Number.isFinite(lat)) points.push({ lat, lng, num: ++n, color: STOP_COLORS[(n - 1) % STOP_COLORS.length], label: d.title, sub: d.from ? fmtRange(d.from, d.to) : d.subtitle });
-    } else if (it.kind === 'lodging' && d.location) {
-      points.push({ ...d.location, kind: 'stay', label: d.title, sub: d.from ? fmtRange(d.from, d.to) : '' });
+      if (Number.isFinite(lat)) points.push({ lat, lng, color: CAT_COLOR.destination, icon: 'flag', label: d.title || d.name, sub: d.subtitle || '', z: 100 });
+    } else if (it.kind === 'lodging') {
+      const loc = d.location || (Number.isFinite(d.lat) ? { lat: d.lat, lng: d.lng } : null);
+      if (loc) points.push({ ...loc, kind: 'stay', color: CAT_COLOR.lodging, image: d.cover || d.images?.[0], label: d.title, sub: [d.address, d.day ? fmtRange(d.day, d.checkout || d.to) : d.from ? fmtRange(d.from, d.to) : ''].filter(Boolean).join(' · '), z: 300 });
     } else if (it.kind === 'note' && Number.isFinite(d.lat)) {
-      points.push({ lat: d.lat, lng: d.lng, label: d.title, sub: d.place || '', color: '#6e6e73', num: ms('location_on') });
+      const c = it.data.category || 'activity';
+      points.push({ lat: d.lat, lng: d.lng, color: CAT_COLOR[c] || CAT_COLOR.activity, icon: (ACT_CATS[c] || ACT_CATS.activity).ic, image: d.image, label: d.title, sub: [d.day ? shortDay(d.day) : 'Návrh', d.time, d.place].filter(Boolean).join(' · '), z: 200 });
     } else if (it.kind === 'transport') {
-      for (const l of [...(d.legs || []), ...(d.returnLegs || [])]) if (l.fromPt && l.toPt) segments.push({ from: l.fromPt, to: l.toPt, mode: l.mode, label: `${dayLabel(l.depart)} ${l.from} → ${l.to}` });
+      const legs = [...(d.legs || []), ...(d.returnLegs || [])].filter((l) => l.fromPt && l.toPt);
+      for (const l of legs) segments.push({ from: l.fromPt, to: l.toPt, mode: l.mode, label: `${dayLabel(l.depart)} ${l.from} → ${l.to}` });
+      if (!legs.length && d.fromPt && d.toPt) segments.push({ from: [d.fromPt.lat, d.fromPt.lng], to: [d.toPt.lat, d.toPt.lng], mode: d.mode || 'train', label: `${d.fromPlace || ''} → ${d.toPlace || ''}` });
     }
   }
   return { points, segments };
@@ -1382,7 +1392,7 @@ async function viewTrips() {
   const { trips } = await api('/trips');
   const card = (t) => `
       <a class="card trip-card${t.status === 'done' ? ' done' : ''}" href="#/trips/${t.id}">
-        <div class="media" style="${cover('europe')}">${t.cover ? photo(t.cover, 'luggage', t.title) : `<div class="fallback">${ms('luggage')}</div>`}
+        <div class="media" style="${cover('europe')}">${t.cover_image ? `<img src="${esc(t.cover_image)}" alt="" loading="lazy" referrerpolicy="no-referrer" style="opacity:1">` : t.cover ? photo(t.cover, 'luggage', t.title) : `<div class="fallback">${ms('luggage')}</div>`}
           <div class="badges">${t.status === 'done' ? '<span class="tag light">Dokončeno</span>' : countdown(t.start_date, 'tag light')}</div></div>
         <div class="body">
           <span class="eyebrow">${{ owner: 'Organizátor', editor: 'Spolucestovatel', viewer: 'Jen čtení' }[t.role]}</span>
@@ -1412,19 +1422,22 @@ function countdown(start, cls = 'tag') {
 
 // ---------- Plánovač výletu ----------
 const ACT_CATS = {
-  transport: { ic: 'train', label: 'Doprava', sub: 'Letenky, vlaky, metro' },
-  lodging: { ic: 'bed', label: 'Ubytování', sub: 'Check-in, apartmány' },
+  transport: { ic: 'train', label: 'Doprava', sub: 'Vyhledat spoj nebo zadat vlastní' },
+  lodging: { ic: 'bed', label: 'Ubytování', sub: 'Airbnb, Booking nebo vlastní' },
   sight: { ic: 'museum', label: 'Památky', sub: 'Vstupy a vyhlídky' },
   food: { ic: 'restaurant', label: 'Gastronomie', sub: 'Kavárny, brunche, večeře' },
   activity: { ic: 'local_activity', label: 'Zážitek', sub: 'Cokoli dalšího' },
 };
 const STATUSES = { '': 'Bez stavu', confirmed: 'Potvrzeno', booked: 'Rezervace', must: 'Must-visit' };
+const TRANSPORT_MODES = { flight: { ic: 'flight', label: 'Let' }, train: { ic: 'train', label: 'Vlak' }, bus: { ic: 'directions_bus', label: 'Autobus' }, car: { ic: 'directions_car', label: 'Auto' }, ferry: { ic: 'directions_boat', label: 'Loď' } };
 const WX = { Jasno: ms('sunny'), Polojasno: ms('partly_cloudy_day'), Zataženo: ms('cloud'), Mlha: ms('foggy'), Mrholení: ms('rainy_light'), Déšť: ms('rainy'), Sníh: ms('weather_snowy'), Bouřky: ms('thunderstorm') };
 const wxIcon = (text) => WX[text] || ms('thermostat');
 const WEEKDAYS = ['neděle', 'pondělí', 'úterý', 'středa', 'čtvrtek', 'pátek', 'sobota'];
 const dayDate = (iso) => new Date(`${iso}T12:00:00`);
 const shortDay = (iso) => { const d = dayDate(iso); return `${DAYS[d.getDay()]} ${d.getDate()}. ${d.getMonth() + 1}.`; };
 const longDay = (iso) => { const d = dayDate(iso); return `${WEEKDAYS[d.getDay()]} ${d.getDate()}. ${d.toLocaleDateString('cs-CZ', { month: 'long', day: 'numeric' }).split(' ').slice(1).join(' ')}`; };
+const todayIso = () => new Date().toISOString().slice(0, 10);
+const daysUntil = (iso) => Math.round((dayDate(iso) - dayDate(todayIso())) / 86400000);
 
 function tripDays(trip) {
   if (!trip.start_date) return [];
@@ -1440,7 +1453,7 @@ function itemWhen(it) {
   const d = it.data;
   if (d.day) return { day: d.day, time: d.time || '' };
   if (it.kind === 'transport') {
-    const dep = d.legs?.[0]?.depart || d.depart || '';
+    const dep = d.depart || d.legs?.[0]?.depart || '';
     if (dep) return { day: dep.slice(0, 10), time: dep.slice(11, 16) };
     if (d.from) return { day: d.from.slice(0, 10), time: '' };
   }
@@ -1449,6 +1462,7 @@ function itemWhen(it) {
 }
 const itemCat = (it) => (it.kind === 'transport' ? 'transport' : it.kind === 'lodging' ? 'lodging' : it.data.category || 'activity');
 const itemTitle = (it) => it.data.title || it.data.text || 'Bez názvu';
+const itemImage = (it) => it.data.cover || it.data.image || it.data.images?.[0] || '';
 
 function tripPlan(items) {
   const scheduled = []; const ideas = []; const places = [];
@@ -1460,8 +1474,11 @@ function tripPlan(items) {
     // Zpáteční spoj se ukáže i v den návratu
     const back = it.kind === 'transport' && it.data.returnLegs?.[0]?.depart;
     if (back && !it.data.day) scheduled.push({ it, day: back.slice(0, 10), time: back.slice(11, 16), returning: true });
+    // Ubytování: odjezd (check-out) v poslední den pobytu
+    const out = it.kind === 'lodging' && (it.data.checkout || it.data.to);
+    if (out && w.day && out.slice(0, 10) !== w.day) scheduled.push({ it, day: out.slice(0, 10), time: '', checkout: true });
   }
-  ideas.sort((a, b) => b.votes - a.votes || a.id - b.id);
+  ideas.sort((a, b) => (b.up - b.down) - (a.up - a.down) || a.id - b.id);
   return { scheduled, ideas, places };
 }
 
@@ -1471,8 +1488,47 @@ const ago = (sqlTime) => {
   if (min < 1) return 'právě teď';
   if (min < 60) return `před ${min} min`;
   if (min < 1440) return `před ${Math.round(min / 60)} h`;
-  return `před ${plural(Math.round(min / 1440), 'dnem', 'dny', 'dny').replace(/^1 dnem$/, 'dnem')}`;
+  const d = Math.round(min / 1440);
+  return d === 1 ? 'včera' : `před ${d} dny`;
 };
+
+async function uploadTripImage(tripId, file, opts) {
+  const image = await imageToDataUrl(file, opts);
+  const { url } = await api(`/trips/${tripId}/files`, { method: 'POST', body: { image } });
+  return url;
+}
+
+// Platby: podíl každého na položce a co zbývá doplatit
+function tripMoney(items, payers) {
+  const ids = payers.map((p) => p.id);
+  const rows = items.filter((i) => i.kind !== 'destination' && i.price > 0).map((it) => {
+    const split = (it.data.split?.length ? it.data.split : ids).filter((id) => ids.includes(id));
+    const who = split.length ? split : ids;
+    const share = it.price / (who.length || 1);
+    return { it, who, share, paid: it.data.paid || {}, due: it.data.due || null };
+  });
+  const person = (id) => {
+    const mine = rows.filter((r) => r.who.includes(id));
+    const owe = mine.reduce((a, r) => a + r.share, 0);
+    const paid = mine.filter((r) => r.paid[id]).reduce((a, r) => a + r.share, 0);
+    return { owe, paid, left: owe - paid, open: mine.filter((r) => !r.paid[id]).sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999')) };
+  };
+  return { rows, person };
+}
+const dueTag = (due) => {
+  if (!due) return '';
+  const n = daysUntil(due);
+  return `<span class="tag${n <= 7 ? ' dark' : ''}">${n < 0 ? 'Po splatnosti' : n === 0 ? 'Splatné dnes' : `do ${shortDate(due)}`}</span>`;
+};
+
+// Stav návrhu podle hlasů party (každý má jeden hlas pro, nebo proti)
+function ideaStatus(it, voters) {
+  const half = voters / 2;
+  if (it.up > half) return ['Schváleno', 'dark'];
+  if (it.down >= half && it.down > it.up) return ['Zamítnuto', 'muted'];
+  if (!it.up && !it.down) return ['Nový návrh', ''];
+  return ['Hlasuje se', ''];
+}
 
 async function viewTrip(id) {
   if (!requireLogin()) return;
@@ -1487,59 +1543,99 @@ function renderTrip(detail, { shared = false } = {}) {
   const { scheduled, ideas, places } = tripPlan(items);
   const dayKey = `tf_day_${trip.id}`;
   let day = sessionStorage.getItem(dayKey);
-  const today = new Date().toISOString().slice(0, 10);
-  if (!days.includes(day)) day = days.includes(today) ? today : days[0] || null;
-  const people = [{ name: owner.name, email: owner.email, role: 'owner' }, ...members.map((m) => ({ ...m, name: m.name || m.email }))];
+  if (!days.includes(day)) day = days.includes(todayIso()) ? todayIso() : days[0] || null;
+  const people = [{ ...owner, role: 'owner' }, ...members.map((m) => ({ id: m.user_id, memberId: m.id, name: m.name || m.email, email: m.email, avatar_v: m.avatar_v, role: m.role, pending: !m.user_id }))];
+  const payers = people.filter((p) => p.id);
+  const me = state.user?.id;
+  const money = tripMoney(items, payers);
   const mainPlace = places[0]?.data;
-  const location = [...new Set(places.map((p) => p.data.title || p.data.name))].slice(0, 3).join(', ') || 'Cíl zatím nevybrán';
+  const placeName = (d) => d?.title || d?.name || '';
+  const whereLabel = [...new Set(places.map((p) => placeName(p.data)))].slice(0, 3).join(', ') || 'Cíl zatím nevybrán';
   const dayItems = (d) => scheduled.filter((x) => x.day === d).sort((a, b) => (a.time || '99').localeCompare(b.time || '99'));
-  const persons = Number(trip.persons) || 1;
+  const persons = Number(trip.persons) || payers.length || 1;
 
   const statusChip = (st) => (st && STATUSES[st] ? `<span class="tag${st === 'confirmed' ? ' dark' : ''}">${STATUSES[st]}</span>` : '');
-  const tlItem = ({ it, time, returning }) => {
+  const tlItem = ({ it, time, returning, checkout }) => {
     const d = it.data; const c = ACT_CATS[itemCat(it)] || ACT_CATS.activity;
-    const sub = it.kind === 'note' ? d.note : [d.subtitle, d.providerName].filter(Boolean).join(' · ');
+    const img = it.kind === 'lodging' && !checkout ? itemImage(it) : '';
+    const sub = it.kind === 'note' ? d.note
+      : it.kind === 'transport' ? [d.fromPlace && d.toPlace ? `${d.fromPlace} → ${d.toPlace}` : d.subtitle, d.carrier || d.providerName].filter(Boolean).join(' · ')
+        : [d.address || d.subtitle, d.providerName].filter(Boolean).join(' · ');
     const cost = it.price != null ? czk(it.price) : '';
     const strong = ['confirmed', 'booked'].includes(d.status) || it.kind !== 'note';
-    return `<li class="tl-row${strong ? ' strong' : ''}">
+    const meta = [
+      d.place && `<span>${ms('location_on', 'sm')} ${esc(d.place)}</span>`,
+      d.seats && `<span>${ms('event_seat', 'sm')} ${esc(d.seats)}</span>`,
+      d.booking && `<span>${ms('confirmation_number', 'sm')} ${esc(d.booking)}</span>`,
+      it.kind === 'lodging' && !checkout && (d.checkout || d.to) && `<span>${ms('event', 'sm')} do ${shortDate(d.checkout || d.to)}</span>`,
+      cost && !returning && !checkout && `<span>${ms('payments', 'sm')} ${cost}</span>`,
+      d.due && !returning && !checkout && dueTag(d.due),
+    ].filter(Boolean).join('');
+    const title = checkout ? `Check-out: ${itemTitle(it)}` : returning ? `Zpět: ${itemTitle(it)}` : itemTitle(it);
+    return `<li class="tl-row${strong ? ' strong' : ''}" style="--c:${CAT_COLOR[itemCat(it)] || '#111'}">
       <i class="tl-dot"></i>
-      <${canEdit ? `button type="button" data-edit="${it.id}"` : 'div'} class="tl-card">
-        <span class="tl-top"><span class="mono">${esc(time || '—')}</span>${returning ? '<span class="tag">Zpáteční cesta</span>' : statusChip(d.status)}</span>
-        <b class="tl-title">${ms(c.ic, 'sm')} ${esc(itemTitle(it))}</b>
-        ${sub ? `<span class="tl-note">${esc(sub)}</span>` : ''}
-        <span class="tl-meta">${d.place ? `<span>${ms('location_on', 'sm')} ${esc(d.place)}</span>` : ''}${cost && !returning ? `<span>${ms('payments', 'sm')} ${cost}</span>` : ''}${it.kind === 'lodging' && d.to ? `<span>${ms('event', 'sm')} do ${shortDate(d.to)}</span>` : ''}</span>
+      <${canEdit ? `button type="button" data-edit="${it.id}"` : 'div'} class="tl-card${img ? ' has-img' : ''}">
+        ${img ? `<img class="tl-img" src="${esc(img)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}
+        <span class="tl-body">
+          <span class="tl-top"><span class="mono">${esc(time || (checkout ? 'odjezd' : '—'))}</span>${returning ? '<span class="tag">Zpáteční cesta</span>' : statusChip(d.status)}</span>
+          <b class="tl-title"><span class="cat-dot">${ms(it.kind === 'transport' ? TRANSPORT_MODES[d.mode]?.ic || c.ic : c.ic, 'sm')}</span> ${esc(title)}</b>
+          ${sub && !checkout ? `<span class="tl-note">${esc(sub)}</span>` : ''}
+          ${meta ? `<span class="tl-meta">${meta}</span>` : ''}
+        </span>
       </${canEdit ? 'button' : 'div'}>
-      ${d.deepLink || d.url ? `<a class="tl-link" href="${esc(d.deepLink || d.url)}" target="_blank" rel="noopener" aria-label="Otevřít odkaz">${ms('arrow_outward', 'sm')}</a>` : ''}
+      <span class="tl-side">
+        ${d.qr ? `<button class="tl-link" data-qr="${it.id}" aria-label="QR kód jízdenky" title="QR kód">${ms('qr_code_2', 'sm')}</button>` : ''}
+        ${d.deepLink || d.url ? `<a class="tl-link" href="${esc(d.deepLink || d.url)}" target="_blank" rel="noopener" aria-label="Otevřít odkaz">${ms('arrow_outward', 'sm')}</a>` : ''}
+      </span>
     </li>`;
   };
 
   const sum = (pred) => items.filter((i) => i.kind !== 'destination' && pred(itemCat(i))).reduce((a, i) => a + (i.price || 0), 0);
   const parts = [['Ubytování', sum((c) => c === 'lodging')], ['Doprava', sum((c) => c === 'transport')], ['Jídlo & kavárny', sum((c) => c === 'food')], ['Vstupy & zážitky', sum((c) => c === 'sight' || c === 'activity')]];
   const pct = trip.budget ? Math.min(100, Math.round((total / trip.budget) * 100)) : total ? 100 : 0;
+  const mine = me ? money.person(me) : null;
 
   const dayBlock = (d) => {
     const list = dayItems(d);
     const idx = days.indexOf(d);
-    const dayCost = list.filter((x) => !x.returning).reduce((a, x) => a + (x.it.price || 0), 0);
+    const dayCost = list.filter((x) => !x.returning && !x.checkout).reduce((a, x) => a + (x.it.price || 0), 0);
     const names = list.filter((x) => x.it.kind === 'note').map((x) => itemTitle(x.it)).slice(0, 2);
     return `<div class="day-head"><div><span class="eyebrow">${esc(longDay(d))} <span class="sep">•</span> Den ${idx + 1}</span>
         <h2 class="h-md">${esc(names.join(' & ') || (idx === 0 ? 'Příjezd' : idx === days.length - 1 && days.length > 1 ? 'Odjezd' : 'Volný den'))}</h2></div>
         <div class="chips-inline"><span class="tag">${plural(list.length, 'aktivita', 'aktivity', 'aktivit')}</span>${dayCost ? `<span class="tag">cca ${czk(dayCost / persons)} / os.</span>` : ''}</div></div>
-      ${list.length ? `<ol class="timeline">${list.map(tlItem).join('')}</ol>` : `<div class="day-empty">${ms('wb_sunny')}<p class="muted">Na tento den zatím nic není. Přidej aktivitu, nebo přesuň nápad party.</p></div>`}
+      ${list.length ? `<ol class="timeline">${list.map(tlItem).join('')}</ol>` : `<div class="day-empty">${ms('wb_sunny')}<p class="muted">Na tento den zatím nic není. Přidej aktivitu, nebo přesuň schválený návrh party.</p></div>`}
       ${canEdit ? `<button class="btn wide" data-add-day="${d}">${ms('add_circle')} Přidat aktivitu do tohoto dne</button>` : ''}`;
   };
 
+  const ideaRow = (it) => {
+    const [st, tone] = ideaStatus(it, payers.length);
+    const c = ACT_CATS[itemCat(it)] || ACT_CATS.activity;
+    const img = itemImage(it);
+    return `<div class="idea${tone === 'muted' ? ' rejected' : ''}">
+      <button class="idea-main" ${canEdit ? `data-edit="${it.id}"` : 'disabled'}>
+        <span class="idea-ic" style="--c:${CAT_COLOR[itemCat(it)]}">${img ? `<img src="${esc(img)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}${ms(c.ic, 'sm')}</span>
+        <span class="grow"><b class="ellipsis">${esc(itemTitle(it))}</b><small class="ellipsis">${esc(it.data.note || it.data.place || it.data.subtitle || c.label)}</small></span>
+      </button>
+      <div class="idea-foot">
+        <span class="tag${tone === 'dark' ? ' dark' : ''}">${st}</span>
+        <span class="grow"></span>
+        <button class="vote${it.myVote === 1 ? ' on' : ''}" data-vote="${it.id}" data-v="${it.myVote === 1 ? 0 : 1}" ${shared ? 'disabled' : ''} aria-label="Hlasovat pro" title="Jsem pro">${ms('thumb_up', 'sm')} ${it.up}</button>
+        <button class="vote${it.myVote === -1 ? ' on' : ''}" data-vote="${it.id}" data-v="${it.myVote === -1 ? 0 : -1}" ${shared ? 'disabled' : ''} aria-label="Hlasovat proti" title="Jsem proti">${ms('thumb_down', 'sm')} ${it.down}</button>
+      </div>
+    </div>`;
+  };
+
   $app.innerHTML = `
-    ${shared ? `<div class="notice">${ms('visibility')}<span>Díváš se na sdílený výlet od <b>${esc(owner.name)}</b>. ${state.user ? '' : '<a href="#/register">Založ si účet</a> a plánuj vlastní.'}</span></div>` : '<a href="#/trips" class="back">' + ms('arrow_back', 'sm') + ' Moje výlety</a>'}
+    ${shared ? `<div class="notice">${ms('visibility')}<span>Díváš se na sdílený výlet od <b>${esc(owner.name)}</b>. ${state.user ? '' : '<a href="#/register">Založ si účet</a> a plánuj vlastní.'}</span></div>` : `<a href="#/trips" class="back">${ms('arrow_back', 'sm')} Moje výlety</a>`}
     <section class="card bento planner-head">
       <div class="ph-top">
         <div class="ph-title">
           <div class="chips-inline"><span class="tag">${ms('sync', 'sm')} Upraveno ${ago(trip.updated_at)}</span>${trip.status === 'done' ? '<span class="tag dark">Dokončený výlet</span>' : countdown(trip.start_date)}</div>
           <h1 class="h-lg">${esc(trip.title)}</h1>
-          <div class="ph-meta"><span>${ms('calendar_today', 'sm')} ${days.length ? `${fmtRange(trip.start_date, trip.end_date)} • ${plural(days.length, 'den', 'dny', 'dní')}` : 'Termín zatím není'}</span><span class="dot-sep"></span><span>${ms('location_on', 'sm')} ${esc(location)}</span></div>
+          <div class="ph-meta"><span>${ms('calendar_today', 'sm')} ${days.length ? `${fmtRange(trip.start_date, trip.end_date)} • ${plural(days.length, 'den', 'dny', 'dní')}` : 'Termín zatím není'}</span><span class="dot-sep"></span><span>${ms('location_on', 'sm')} ${esc(whereLabel)}</span></div>
         </div>
         <div class="ph-actions">
-          <span class="stack">${people.slice(0, 4).map((p, i) => `<span class="avatar${i === 0 ? ' dark' : ''}" title="${esc(p.name)}">${esc(initials(p.name))}</span>`).join('')}${people.length > 4 ? `<span class="avatar">+${people.length - 4}</span>` : ''}</span>
+          <span class="stack">${people.slice(0, 4).map((p) => avatarHtml(p)).join('')}${people.length > 4 ? `<span class="avatar">+${people.length - 4}</span>` : ''}</span>
           ${isOwner ? `<button class="btn" id="invite-btn">${ms('person_add')} Pozvat přátele</button>` : ''}
           ${!shared ? `<a class="round-btn" href="#/chat/t/${trip.id}" title="Chat výletu" aria-label="Chat výletu">${ms('chat_bubble')}</a>` : ''}
           ${isOwner ? `<button class="round-btn" id="share-btn" title="Sdílet náhled" aria-label="Sdílet náhled">${ms('ios_share')}</button>` : ''}
@@ -1556,25 +1652,25 @@ function renderTrip(detail, { shared = false } = {}) {
       <div class="pl-left">
         ${canEdit ? `<section class="card bento">
           <div class="card-head"><h3>Rychlé přidání</h3><span class="small muted">Kliknutím vložit</span></div>
-          <p class="muted small">Vyber typ a doplň detaily. Uloží se do ${day ? 'vybraného dne' : 'nápadů party'}.</p>
-          <div class="quick-tiles">${['transport', 'lodging', 'sight', 'food'].map((k) => `<button class="q-tile" data-quick="${k}">${ms(ACT_CATS[k].ic)}<b>${ACT_CATS[k].label}</b><small>${ACT_CATS[k].sub}</small></button>`).join('')}</div>
-          ${mainPlace?.destinationId ? `<a class="link-arrow small" href="${dHref(mainPlace.destinationId)}">Najít spoje a ubytování pro ${esc(mainPlace.title || mainPlace.name)} ${ms('arrow_forward', 'sm')}</a>` : ''}
+          <p class="muted small">Doprava a ubytování jdou vyhledat, nebo zadat vlastní i s rezervací. Uloží se do ${day ? 'vybraného dne' : 'návrhů party'}.</p>
+          <div class="quick-tiles">${['transport', 'lodging', 'sight', 'food'].map((k) => `<button class="q-tile" data-quick="${k}" style="--c:${CAT_COLOR[k]}"><span class="q-ic">${ms(ACT_CATS[k].ic)}</span><b>${ACT_CATS[k].label}</b><small>${ACT_CATS[k].sub}</small></button>`).join('')}</div>
         </section>` : ''}
         <section class="card bento">
-          <div class="card-head"><h3>Nápady party</h3><span class="tag">${plural(ideas.length, 'návrh', 'návrhy', 'návrhů')}</span></div>
-          <p class="muted small">Zatím nezařazeno do konkrétních časů. Hlasujte o nejlepších místech.</p>
-          <div class="ideas">${ideas.map((it) => `<div class="idea">
-              <button class="idea-main" ${canEdit ? `data-edit="${it.id}"` : 'disabled'}>${ms((ACT_CATS[itemCat(it)] || ACT_CATS.activity).ic)}<span class="grow"><b class="ellipsis">${esc(itemTitle(it))}</b><small class="ellipsis">${esc(it.data.note || it.data.place || it.data.subtitle || (ACT_CATS[itemCat(it)] || ACT_CATS.activity).label)}</small></span></button>
-              <button class="vote${it.voted ? ' on' : ''}" data-vote="${it.id}" ${shared ? 'disabled' : ''} aria-label="Hlasovat">${ms('thumb_up', 'sm')} ${it.votes}</button>
-            </div>`).join('') || '<p class="small muted empty-line">Žádné nápady. Navrhni první místo nebo ho přidej z mapy.</p>'}</div>
-          ${canEdit ? `<button class="btn soft wide" id="suggest">${ms('add_location_alt')} Navrhnout místo</button>` : ''}
+          <div class="card-head"><h3>Návrhy party</h3><span class="tag">${plural(ideas.length, 'návrh', 'návrhy', 'návrhů')}</span></div>
+          <p class="muted small">Každý má jeden hlas: pro, nebo proti. Schválený návrh zařadíš kliknutím do konkrétního dne.</p>
+          <div class="ideas">${ideas.map(ideaRow).join('') || '<p class="small muted empty-line">Zatím žádné návrhy. Navrhni první místo, nebo ho přidej z mapy Prozkoumat.</p>'}</div>
+          ${!shared && role !== 'viewer' ? `<button class="btn soft wide" id="suggest">${ms('add_location_alt')} Navrhnout místo</button>` : ''}
         </section>
         <section class="tip-card" id="tip-card" hidden></section>
       </div>
 
       <div class="pl-center">
-        <section class="card bento day-card">${day ? dayBlock(day) : `<div class="day-empty">${ms('calendar_month')}<p class="muted">Nastav termín výletu a rozplánuj program po dnech. Do té doby se vše ukládá jako nápady party.</p>${canEdit ? '<button class="btn" id="set-dates-2">Nastavit termín</button>' : ''}</div>`}</section>
-        <section class="card bento map-wrap" id="trip-map-card" hidden><div class="card-head"><h3>Mapa výletu</h3></div><div class="map" id="trip-map"></div></section>
+        <section class="card bento day-card">${day ? dayBlock(day) : `<div class="day-empty">${ms('calendar_month')}<p class="muted">Nastav termín výletu a rozplánuj program po dnech. Do té doby se vše ukládá jako návrhy party.</p>${canEdit ? '<button class="btn" id="set-dates-2">Nastavit termín</button>' : ''}</div>`}</section>
+        <section class="card bento map-wrap" id="trip-map-card" hidden>
+          <div class="card-head"><h3>Mapa výletu</h3><span class="small muted">Vše, co máte v plánu</span></div>
+          <div class="map" id="trip-map"></div>
+          <div class="map-legend-row">${Object.entries({ lodging: 'Ubytování', sight: 'Památky', food: 'Gastro', activity: 'Zážitky', transport: 'Doprava' }).map(([k, l]) => `<span><i style="background:${CAT_COLOR[k]}"></i>${l}</span>`).join('')}</div>
+        </section>
       </div>
 
       <div class="pl-right">
@@ -1584,13 +1680,20 @@ function renderTrip(detail, { shared = false } = {}) {
           <div class="progress${trip.budget && total > trip.budget ? ' over' : ''}"><i style="width:${pct}%"></i></div>
           ${trip.budget && total > trip.budget ? `<p class="small" style="margin-top:8px">Přes rozpočet o ${czk(total - trip.budget)}</p>` : ''}
           <ul class="legend-list">${parts.map(([l, v], i) => `<li><i class="lg${i}"></i><span class="grow">${l}</span><b class="num">${czk(v)}</b></li>`).join('')}</ul>
-          ${canEdit ? '<button class="btn soft wide" id="budget-btn">Spravovat náklady</button>' : ''}
+          ${mine && !shared ? `<div class="pay-box">
+            <div class="row-between"><span class="small muted">Tobě zbývá doplatit</span><b class="num">${czk(mine.left)}</b></div>
+            ${mine.open.length ? `<ul class="pay-list">${mine.open.slice(0, 4).map((r) => `<li><span class="grow"><b class="ellipsis">${esc(itemTitle(r.it))}</b><small class="ellipsis">${czk(r.share)}${r.who.length > 1 ? ` z ${czk(r.it.price)}` : ''}</small></span>${dueTag(r.due)}<button class="icon-btn" data-paid="${r.it.id}" title="Označit jako zaplacené" aria-label="Zaplaceno">${ms('check_circle')}</button></li>`).join('')}</ul>` : `<p class="small muted" style="margin-top:6px">${mine.owe ? 'Všechno máš zaplacené.' : 'Zatím tu nejsou žádné náklady.'}</p>`}
+          </div>` : ''}
+          ${!shared ? '<button class="btn soft wide" id="budget-btn">Platby a náklady</button>' : ''}
         </section>
         <section class="card bento">
           <div class="card-head"><h3>Spolucestovatelé</h3><span class="small muted">${plural(people.length, 'člen', 'členové', 'členů')}</span></div>
-          <ul class="people">${people.map((p, i) => `<li><span class="avatar${i === 1 ? ' dark' : ''}">${esc(initials(p.name))}</span><span class="grow"><b class="ellipsis">${esc(p.name)}</b><small class="ellipsis">${p.role === 'owner' ? 'organizátor' : p.user_id ? esc(p.email || '') : 'čeká na registraci'}</small></span>
+          <ul class="people">${people.map((p) => {
+            const pm = p.id ? money.person(p.id) : null;
+            return `<li>${avatarHtml(p)}<span class="grow"><b class="ellipsis">${esc(p.name)}</b><small class="ellipsis">${p.pending ? 'čeká na registraci' : pm && pm.owe ? (pm.left > 0.5 ? `doplácí ${czk(pm.left)}` : 'vše zaplaceno') : p.role === 'owner' ? 'organizátor' : esc(p.email || '')}</small></span>
             <span class="tag${p.role === 'owner' ? ' dark' : ''}">${{ owner: 'Organizátor', editor: 'Editor', viewer: 'Prohlížení' }[p.role]}</span>
-            ${p.id && (isOwner || p.user_id === state.user?.id) ? `<button class="icon-btn" data-rm="${p.id}" aria-label="Odebrat">${ms('close', 'sm')}</button>` : ''}</li>`).join('')}</ul>
+            ${p.memberId && (isOwner || p.id === me) ? `<button class="icon-btn" data-rm="${p.memberId}" aria-label="Odebrat">${ms('close', 'sm')}</button>` : ''}</li>`;
+          }).join('')}</ul>
           ${isOwner ? `<div class="copy-row">${ms('link', 'sm')}<span class="ellipsis grow" id="invite-url">${trip.invite_token ? esc(`${location.host}/#/join/${trip.invite_token}`) : 'Odkaz pro přidání do výletu'}</span><button class="btn sm light" id="copy-invite">${trip.invite_token ? 'Kopírovat' : 'Vytvořit'}</button></div>` : ''}
         </section>
         <section class="card bento" id="weather-card" hidden></section>
@@ -1598,14 +1701,14 @@ function renderTrip(detail, { shared = false } = {}) {
     </div>`;
 
   const run = (p) => p.then((d) => renderTrip(d)).catch((e) => toast(e.message));
-  const refresh = () => run(api(`/trips/${trip.id}`));
+  const tripUrl = `/trips/${trip.id}`;
 
   // Dny
   $app.querySelectorAll('[data-day]').forEach((b) => b.addEventListener('click', () => { sessionStorage.setItem(dayKey, b.dataset.day); renderTrip(detail, { shared }); }));
   document.querySelector('.day-tabs [aria-selected="true"]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
   document.getElementById('add-day')?.addEventListener('click', () => {
     sessionStorage.setItem(dayKey, addDays(days.at(-1), 1));
-    run(api(`/trips/${trip.id}`, { method: 'PATCH', body: { end_date: addDays(days.at(-1), 1) } }));
+    run(api(tripUrl, { method: 'PATCH', body: { end_date: addDays(days.at(-1), 1) } }));
   });
   const editTrip = () => modal(`<h2>Upravit výlet</h2>
     <form id="f" class="stack-form">${tripForm(trip)}
@@ -1613,70 +1716,326 @@ function renderTrip(detail, { shared = false } = {}) {
       <div class="modal-actions"><button type="button" class="btn ghost" data-close>Zrušit</button><button class="btn">Uložit</button></div>
     </form>`, (m, close) => m.querySelector('#f').addEventListener('submit', (e) => {
     e.preventDefault(); close();
-    run(api(`/trips/${trip.id}`, { method: 'PATCH', body: Object.fromEntries(new FormData(e.target)) }));
+    run(api(tripUrl, { method: 'PATCH', body: Object.fromEntries(new FormData(e.target)) }));
   }));
   ['set-dates', 'set-dates-2'].forEach((id) => document.getElementById(id)?.addEventListener('click', editTrip));
 
-  // Aktivity
+  // Společné části formulářů: platba (cena, splatnost, kdo platí)
+  const payFields = (d = {}) => `<div class="two">
+      <div><label for="p-cost">Cena celkem (Kč)</label><input id="p-cost" name="cost" type="number" min="0" step="10" value="${esc(d.cost ?? '')}" placeholder="volitelné"></div>
+      <div><label for="p-due">Zaplatit do</label><input id="p-due" name="due" type="date" value="${esc(d.due || '')}"></div>
+    </div>
+    ${payers.length > 1 ? `<div><span class="label">Kdo se na platbě podílí</span><div class="check-chips">${payers.map((p) => `<label class="check-chip"><input type="checkbox" name="split" value="${p.id}" ${!d.split?.length || d.split.includes(p.id) ? 'checked' : ''}><span>${esc(p.name.split(' ')[0])}</span></label>`).join('')}</div></div>` : ''}`;
+  const readPay = (form) => {
+    const fd = new FormData(form);
+    const split = fd.getAll('split').map(Number);
+    return { cost: fd.get('cost') === '' || fd.get('cost') == null ? null : Number(fd.get('cost')), due: fd.get('due') || null, split: split.length === payers.length ? [] : split };
+  };
+  const placeField = (d = {}, label = 'Místo', id = 'a-place') => `<div class="ac-wrap"><label for="${id}">${label}</label><input id="${id}" name="place" maxlength="160" value="${esc(d.place || d.address || '')}" placeholder="Hledat adresu nebo místo…" autocomplete="off"></div>`;
+  const bindPlace = (input, target) => autocomplete(input, { onSelect: (r) => { Object.assign(target, { lat: r.lat, lng: r.lng }); input.value = r.name + (r.detail ? `, ${r.detail}` : ''); } });
+  const saveItem = (it, kind, data) => (it
+    ? api(`${tripUrl}/items/${it.id}`, { method: 'PATCH', body: data })
+    : api(`${tripUrl}/items`, { method: 'POST', body: { kind, data: { ...data, price: data.cost ?? undefined } } }));
+  const delBtn = (it) => (it ? `<button type="button" class="btn danger" data-del-item>Odebrat</button><span class="grow"></span>` : '');
+  const bindDel = (m, close, it) => m.querySelector('[data-del-item]')?.addEventListener('click', () => { if (!confirm('Odebrat z výletu?')) return; close(); run(api(`${tripUrl}/items/${it.id}`, { method: 'DELETE' })); });
+
+  // ----- Aktivita / návrh místa -----
   const activityModal = (it, preset = {}) => {
-    const d = it ? { ...it.data, ...itemWhen(it) } : { category: 'activity', ...preset };
-    const isNote = !it || it.kind === 'note';
+    if (it?.kind === 'transport') return transportModal(it);
+    if (it?.kind === 'lodging') return lodgingModal(it);
+    const d = it ? { ...it.data, ...itemWhen(it), cost: it.price ?? it.data.cost } : { category: 'activity', ...preset };
+    const geo = { lat: d.lat ?? null, lng: d.lng ?? null };
     const cat = it ? itemCat(it) : d.category;
-    modal(`<h2>${it ? 'Upravit' : 'Nová aktivita'}</h2>
+    const isIdea = !d.day;
+    modal(`<h2>${it ? (isIdea ? 'Návrh party' : 'Upravit aktivitu') : preset.day ? 'Nová aktivita' : 'Navrhnout místo'}</h2>
+      ${it && isIdea ? `<p class="small muted" style="margin-top:6px">${it.up} pro · ${it.down} proti. Vyber den a návrh se přesune do programu.</p>` : ''}
       <form id="af" class="stack-form">
-        <div><label for="a-title">Název</label><input id="a-title" name="title" required maxlength="160" value="${esc(it ? itemTitle(it) : '')}" placeholder="${cat === 'food' ? 'např. Café Janis' : cat === 'transport' ? 'např. Tramvaj 15E do Belému' : 'např. Klášter Jerónimos'}"></div>
+        <div><label for="a-title">Název</label><input id="a-title" name="title" required maxlength="160" value="${esc(it ? itemTitle(it) : '')}" placeholder="${cat === 'food' ? 'např. Café Janis' : 'např. Klášter Jerónimos'}"></div>
+        ${placeField(d)}
         <div class="two">
-          <div><label for="a-day">Den</label><select id="a-day" name="day"><option value="">Nápad (bez dne)</option>${days.map((x) => `<option value="${x}" ${x === d.day ? 'selected' : ''}>${shortDay(x)}</option>`).join('')}</select></div>
+          <div><label for="a-day">Den</label><select id="a-day" name="day"><option value="">Návrh (bez dne)</option>${days.map((x) => `<option value="${x}" ${x === d.day ? 'selected' : ''}>${shortDay(x)}</option>`).join('')}</select></div>
           <div><label for="a-time">Čas</label><input id="a-time" name="time" type="time" value="${esc(d.time || '')}"></div>
         </div>
-        ${isNote ? `<div class="two">
-          <div><label for="a-cat">Typ</label><select id="a-cat" name="category">${Object.entries(ACT_CATS).map(([k, v]) => `<option value="${k}" ${k === cat ? 'selected' : ''}>${v.label}</option>`).join('')}</select></div>
-          <div><label for="a-cost">Cena celkem (Kč)</label><input id="a-cost" name="cost" type="number" min="0" step="10" value="${esc(d.cost ?? '')}" placeholder="volitelné"></div>
-        </div>` : ''}
         <div class="two">
-          <div><label for="a-place">Místo</label><input id="a-place" name="place" maxlength="160" value="${esc(d.place || '')}" placeholder="adresa nebo zastávka"></div>
+          <div><label for="a-cat">Typ</label><select id="a-cat" name="category">${['sight', 'food', 'activity'].map((k) => `<option value="${k}" ${k === cat ? 'selected' : ''}>${ACT_CATS[k].label}</option>`).join('')}</select></div>
           <div><label for="a-status">Stav</label><select id="a-status" name="status">${Object.entries(STATUSES).map(([k, v]) => `<option value="${k}" ${k === (d.status || '') ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
         </div>
-        <div><label for="a-note">Poznámka</label><textarea id="a-note" name="note" maxlength="1000" placeholder="Rezervace, vstupenky, tipy…">${esc(isNote ? d.note || '' : d.note || '')}</textarea></div>
-        <div class="modal-actions">${it ? `<button type="button" class="btn danger" id="a-del">Odebrat</button><span class="grow"></span>` : ''}<button type="button" class="btn ghost" data-close>Zrušit</button><button class="btn">${it ? 'Uložit' : 'Přidat'}</button></div>
+        ${payFields(d)}
+        <div><label for="a-note">Poznámka</label><textarea id="a-note" name="note" maxlength="1000" placeholder="Rezervace, vstupenky, tipy…">${esc(d.note || '')}</textarea></div>
+        <div class="modal-actions">${delBtn(it)}<button type="button" class="btn ghost" data-close>Zrušit</button><button class="btn">${it ? 'Uložit' : 'Přidat'}</button></div>
       </form>`, (m, close) => {
+      bindPlace(m.querySelector('#a-place'), geo);
       m.querySelector('#af').addEventListener('submit', (e) => {
         e.preventDefault();
-        const body = Object.fromEntries(new FormData(e.target));
+        const fd = new FormData(e.target);
+        const body = { title: fd.get('title'), place: fd.get('place'), day: fd.get('day') || null, time: fd.get('time') || null, category: fd.get('category'), status: fd.get('status'), note: fd.get('note'), ...readPay(e.target), ...geo };
         close();
-        if (it) run(api(`/trips/${trip.id}/items/${it.id}`, { method: 'PATCH', body }));
-        else run(api(`/trips/${trip.id}/items`, { method: 'POST', body: { kind: 'note', data: { ...preset, ...body, cost: body.cost === '' ? null : Number(body.cost), price: body.cost || undefined } } }));
+        run(saveItem(it, 'note', body));
       });
-      m.querySelector('#a-del')?.addEventListener('click', () => { close(); run(api(`/trips/${trip.id}/items/${it.id}`, { method: 'DELETE' })); });
+      bindDel(m, close, it);
     });
   };
+
+  // ----- Doprava: vyhledání spoje nebo vlastní spoj (místa, rezervace, QR kód) -----
+  const transportModal = (it, preset = {}) => {
+    const d = it ? { ...it.data, cost: it.price ?? it.data.cost } : { mode: 'train', ...preset };
+    const pts = { fromPt: d.fromPt || null, toPt: d.toPt || null };
+    let qr = d.qr || null;
+    const dayDefault = d.depart?.slice(0, 10) || preset.day || day || trip.start_date || todayIso();
+    const destName = placeName(mainPlace);
+    const own = `<form id="tf" class="stack-form">
+        <div class="seg-choice">${Object.entries(TRANSPORT_MODES).map(([k, { ic, label: l }]) => `<label><input type="radio" name="mode" value="${k}" ${k === (d.mode || 'train') ? 'checked' : ''}><span>${ms(ic, 'sm')} ${l}</span></label>`).join('')}</div>
+        <div><label for="t-carrier">Dopravce a číslo spoje</label><input id="t-carrier" name="carrier" maxlength="120" value="${esc(d.carrier || '')}" placeholder="např. RegioJet RJ 1032, Ryanair FR 1234"></div>
+        <div class="two">
+          <div class="ac-wrap"><label for="t-from">Odkud</label><input id="t-from" name="fromPlace" required maxlength="160" value="${esc(d.fromPlace || '')}" placeholder="Stanice, letiště, město" autocomplete="off"></div>
+          <div class="ac-wrap"><label for="t-to">Kam</label><input id="t-to" name="toPlace" required maxlength="160" value="${esc(d.toPlace || destName)}" placeholder="Stanice, letiště, město" autocomplete="off"></div>
+        </div>
+        <div class="two dt">
+          <div><label for="t-dep">Odjezd</label><input id="t-dep" name="depart" type="datetime-local" value="${esc(d.depart || `${dayDefault}T08:00`)}" required></div>
+          <div><label for="t-arr">Příjezd</label><input id="t-arr" name="arrive" type="datetime-local" value="${esc(d.arrive || '')}"></div>
+        </div>
+        <div class="two">
+          <div><label for="t-seats">Místa</label><input id="t-seats" name="seats" maxlength="120" value="${esc(d.seats || '')}" placeholder="vůz 5, sedadla 21–24"></div>
+          <div><label for="t-book">Rezervace / kód</label><input id="t-book" name="booking" maxlength="80" value="${esc(d.booking || '')}" placeholder="např. 8KX2QF"></div>
+        </div>
+        <div><span class="label">QR kód jízdenky</span><div class="qr-row" id="qr-row"></div></div>
+        <div><label for="t-url">Odkaz na jízdenku</label><input id="t-url" name="url" type="url" value="${esc(d.url || d.deepLink || '')}" placeholder="https://…"></div>
+        ${payFields(d)}
+        <div><label for="t-note">Poznámka</label><textarea id="t-note" name="note" maxlength="1000">${esc(d.note || '')}</textarea></div>
+        <div class="modal-actions">${delBtn(it)}<button type="button" class="btn ghost" data-close>Zrušit</button><button class="btn">${it ? 'Uložit' : 'Přidat spoj'}</button></div>
+      </form>`;
+    modal(`<h2>${it ? 'Upravit dopravu' : 'Doprava'}</h2>
+      ${it ? '' : `<div class="segmented tabs-2" role="tablist"><button data-tab="search" aria-pressed="true">${ms('search', 'sm')} Vyhledat spoj</button><button data-tab="own" aria-pressed="false">${ms('edit', 'sm')} Vlastní spoj</button></div>`}
+      <div id="tab-search" ${it ? 'hidden' : ''}>
+        <form id="ts" class="stack-form">
+          <div class="two">
+            <div class="ac-wrap"><label for="s-from">Odkud</label><input id="s-from" value="${esc(originName())}" autocomplete="off"></div>
+            <div class="ac-wrap"><label for="s-to">Kam</label><input id="s-to" value="${esc(destName)}" placeholder="Cíl výletu" autocomplete="off" required></div>
+          </div>
+          <div class="two"><div><label for="s-day">Datum</label><input id="s-day" type="date" value="${dayDefault}" required></div><div><label for="s-n">Cestujících</label><input id="s-n" type="number" min="1" max="9" value="${Math.min(9, payers.length || persons)}"></div></div>
+          <button class="btn">${ms('search', 'sm')} Hledat spoje</button>
+        </form>
+        <div id="s-out"></div>
+      </div>
+      <div id="tab-own" ${it ? '' : 'hidden'}>${own}</div>`, (m, close) => {
+      // Přepínání záložek
+      m.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => {
+        m.querySelectorAll('[data-tab]').forEach((x) => x.setAttribute('aria-pressed', x === b));
+        m.querySelector('#tab-search').hidden = b.dataset.tab !== 'search';
+        m.querySelector('#tab-own').hidden = b.dataset.tab !== 'own';
+      }));
+      // Vyhledání
+      let origin = state.search.origin; let dest = mainPlace?.destinationId || null;
+      autocomplete(m.querySelector('#s-from'), { suggestions: () => POPULAR_ORIGINS, onSelect: (r) => { origin = r.kind === 'airport' ? r.airport : r.id; } });
+      autocomplete(m.querySelector('#s-to'), { onSelect: (r) => { dest = r.id; } });
+      m.querySelector('#ts').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const out = m.querySelector('#s-out');
+        if (!dest) { out.innerHTML = '<p class="small muted empty-line">Vyber cíl z nabídky našeptávače.</p>'; return; }
+        const date = m.querySelector('#s-day').value; const n = m.querySelector('#s-n').value;
+        out.innerHTML = '<div class="skeleton" style="height:180px;margin-top:16px"></div>';
+        try {
+          const data = await api(`/destinations/${enc(dest)}/offers?${new URLSearchParams({ from: date, to: addDays(date, 1), persons: n, origin, oneWay: '1' })}`);
+          const list = data.offers.transport;
+          out.innerHTML = list.length ? `<div class="result-list">${list.slice(0, 12).map((o, i) => {
+            const l0 = o.legs?.[0]; const ll = o.legs?.at(-1);
+            return `<div class="result"><span class="r-ic">${ms(MODE_ICON[o.mode] || 'flight')}</span>
+              <span class="grow"><b class="ellipsis">${l0 ? `${time(l0.depart)} ${esc(l0.from)} → ${time(ll.arrive)} ${esc(ll.to)}` : esc(o.title)}</b>
+              <small class="ellipsis">${esc(o.providerName)} · ${esc(o.subtitle || '')}${o.mock ? ' · ukázková cena' : ''}</small></span>
+              <span class="r-price"><b>${czk(o.price)}</b><button class="btn sm" data-pick="${i}">Přidat</button></span></div>`;
+          }).join('')}</div>${compareLinks(data.links?.transport || [])}`
+            : '<p class="small muted empty-line">Pro tento den jsme nic nenašli. Zkus jiný den, nebo zadej vlastní spoj.</p>';
+          out.querySelectorAll('[data-pick]').forEach((b) => b.addEventListener('click', () => {
+            const o = list[b.dataset.pick]; const l0 = o.legs?.[0]; const ll = o.legs?.at(-1);
+            close();
+            run(api(`${tripUrl}/items`, { method: 'POST', body: { kind: 'transport', data: { ...o, title: o.title, depart: l0?.depart?.slice(0, 16), arrive: ll?.arrive?.slice(0, 16), fromPlace: l0?.from, toPlace: ll?.to, day: (l0?.depart || date).slice(0, 10), time: l0?.depart?.slice(11, 16) || null, cost: o.price, persons: Number(n) } } }));
+          }));
+        } catch (err) { out.innerHTML = `<p class="small muted empty-line">${esc(err.message)}</p>`; }
+      });
+      // Vlastní spoj
+      const qrRow = m.querySelector('#qr-row');
+      const drawQr = () => {
+        qrRow.innerHTML = qr ? `<img class="qr-thumb" src="${esc(qr)}" alt="QR kód"><button type="button" class="btn soft sm" id="qr-up">Vyměnit</button><button type="button" class="btn ghost sm" id="qr-rm">Odebrat</button>`
+          : `<button type="button" class="btn soft sm" id="qr-up">${ms('qr_code_2', 'sm')} Nahrát QR kód nebo jízdenku</button>`;
+        qrRow.querySelector('#qr-up').onclick = async () => {
+          const [f] = await pickImages(); if (!f) return;
+          qrRow.innerHTML = '<span class="small muted">Nahrávám…</span>';
+          try { qr = await uploadTripImage(trip.id, f, { max: 1400, quality: 0.9 }); } catch (err) { toast(err.message); }
+          drawQr();
+        };
+        qrRow.querySelector('#qr-rm')?.addEventListener('click', () => { qr = null; drawQr(); });
+      };
+      drawQr();
+      const ac = (id, key) => autocomplete(m.querySelector(id), { onSelect: (r) => { pts[key] = { lat: r.lat, lng: r.lng }; m.querySelector(id).value = r.name; } });
+      ac('#t-from', 'fromPt'); ac('#t-to', 'toPt');
+      m.querySelector('#tf').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const mode = fd.get('mode');
+        const dep = fd.get('depart');
+        const body = {
+          mode, carrier: fd.get('carrier'), fromPlace: fd.get('fromPlace'), toPlace: fd.get('toPlace'), depart: dep, arrive: fd.get('arrive') || null,
+          seats: fd.get('seats'), booking: fd.get('booking'), url: fd.get('url') || null, note: fd.get('note'), qr,
+          title: `${fd.get('carrier') || TRANSPORT_MODES[mode].label} · ${fd.get('fromPlace')} → ${fd.get('toPlace')}`,
+          day: dep.slice(0, 10), time: dep.slice(11, 16), status: 'booked', ...pts, ...readPay(e.target),
+        };
+        close();
+        run(saveItem(it, 'transport', body));
+      });
+      bindDel(m, close, it);
+    }, { wide: true });
+  };
+
+  // ----- Ubytování: Airbnb s fotkami, Booking.com a vlastní (fotky, náhledový obrázek) -----
+  const lodgingModal = (it, preset = {}) => {
+    const d = it ? { ...it.data, cost: it.price ?? it.data.cost } : { ...preset };
+    const geo = { lat: d.location?.lat ?? d.lat ?? null, lng: d.location?.lng ?? d.lng ?? null };
+    let images = [...(d.images || [])];
+    let coverImg = d.cover || images[0] || null;
+    const checkin = d.day || d.from?.slice(0, 10) || preset.day || trip.start_date || todayIso();
+    const checkout = d.checkout || d.to?.slice(0, 10) || (trip.end_date && trip.end_date > checkin ? trip.end_date : addDays(checkin, 2));
+    const destName = placeName(mainPlace);
+    const bookingUrl = (q, a, b, n) => `https://www.booking.com/searchresults.cs.html?${new URLSearchParams({ ss: q, checkin: a, checkout: b, group_adults: n, no_rooms: 1 })}`;
+    modal(`<h2>${it ? 'Ubytování' : 'Přidat ubytování'}</h2>
+      ${it ? '' : `<div class="segmented tabs-3" role="tablist"><button data-tab="bnb" aria-pressed="true">Airbnb</button><button data-tab="booking" aria-pressed="false">Booking.com</button><button data-tab="own" aria-pressed="false">Vlastní</button></div>`}
+      <div id="tab-bnb" ${it ? 'hidden' : ''}>
+        <form id="ls" class="stack-form">
+          <div class="ac-wrap"><label for="l-where">Kde</label><input id="l-where" value="${esc(destName)}" placeholder="Město nebo čtvrť" autocomplete="off" required></div>
+          <div class="three"><div><label for="l-in">Příjezd</label><input id="l-in" type="date" value="${checkin}" required></div><div><label for="l-out">Odjezd</label><input id="l-out" type="date" value="${checkout}" required></div><div><label for="l-n">Hosté</label><input id="l-n" type="number" min="1" max="16" value="${payers.length || persons}"></div></div>
+          <button class="btn">${ms('search', 'sm')} Hledat na Airbnb</button>
+        </form>
+        <div id="l-out-list"></div>
+      </div>
+      <div id="tab-booking" hidden>
+        <p class="muted" style="margin-top:16px">Booking.com nemá veřejné vyhledávání pro aplikace, takže tě pošleme rovnou na jejich výsledky s vyplněným místem, termínem a počtem hostů. Vybrané ubytování pak ulož v záložce „Vlastní“ i s odkazem a fotkami.</p>
+        <a class="btn" id="bk-go" target="_blank" rel="noopener" style="margin-top:16px">Otevřít Booking.com ${ms('arrow_outward', 'sm')}</a>
+      </div>
+      <div id="tab-own" ${it ? '' : 'hidden'}>
+        <form id="lf" class="stack-form">
+          <div><label for="o-title">Název</label><input id="o-title" name="title" required maxlength="160" value="${esc(d.title || '')}" placeholder="např. Apartmán v Alfamě"></div>
+          ${placeField(d, 'Adresa', 'o-addr')}
+          <div class="three"><div><label for="o-in">Příjezd</label><input id="o-in" name="day" type="date" value="${checkin}" required></div><div><label for="o-out">Odjezd</label><input id="o-out" name="checkout" type="date" value="${checkout}"></div><div><label for="o-time">Check-in</label><input id="o-time" name="time" type="time" value="${esc(d.time || '')}"></div></div>
+          <div class="two"><div><label for="o-url">Odkaz (Booking, Airbnb…)</label><input id="o-url" name="url" type="url" value="${esc(d.url || d.deepLink || '')}" placeholder="https://…"></div><div><label for="o-book">Rezervace / kód</label><input id="o-book" name="booking" maxlength="80" value="${esc(d.booking || '')}"></div></div>
+          <div><span class="label">Fotky · klikni na fotku a nastav ji jako náhled</span><div class="photo-grid" id="o-photos"></div></div>
+          ${payFields(d)}
+          <div><label for="o-note">Poznámka</label><textarea id="o-note" name="note" maxlength="1000" placeholder="Kód ke schránce, Wi-Fi, parkování…">${esc(d.note || '')}</textarea></div>
+          <div class="modal-actions">${delBtn(it)}<button type="button" class="btn ghost" data-close>Zrušit</button><button class="btn">${it ? 'Uložit' : 'Přidat ubytování'}</button></div>
+        </form>
+      </div>`, (m, close) => {
+      m.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => {
+        m.querySelectorAll('[data-tab]').forEach((x) => x.setAttribute('aria-pressed', x === b));
+        for (const t of ['bnb', 'booking', 'own']) m.querySelector(`#tab-${t}`).hidden = b.dataset.tab !== t;
+        if (b.dataset.tab === 'booking') m.querySelector('#bk-go').href = bookingUrl(m.querySelector('#l-where').value || destName, m.querySelector('#l-in').value, m.querySelector('#l-out').value, m.querySelector('#l-n').value);
+      }));
+      // Airbnb
+      let dest = mainPlace?.destinationId || null;
+      autocomplete(m.querySelector('#l-where'), { onSelect: (r) => { dest = r.id; } });
+      m.querySelector('#ls')?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const out = m.querySelector('#l-out-list');
+        if (!dest) { out.innerHTML = '<p class="small muted empty-line">Vyber místo z nabídky našeptávače.</p>'; return; }
+        const a = m.querySelector('#l-in').value; const b = m.querySelector('#l-out').value; const n = m.querySelector('#l-n').value;
+        out.innerHTML = '<div class="skeleton" style="height:220px;margin-top:16px"></div>';
+        try {
+          const data = await api(`/destinations/${enc(dest)}/offers?${new URLSearchParams({ from: a, to: b, persons: n, origin: state.search.origin })}`);
+          const list = data.offers.lodging;
+          out.innerHTML = list.length ? `${list.some((o) => o.mock) ? '<p class="small muted" style="margin-top:12px">Ukázkové nabídky: skutečné inzeráty s fotkami se ukážou po vložení klíče SerpApi. Odkaz vede na skutečné hledání na Airbnb.</p>' : ''}
+            <div class="stay-grid">${list.slice(0, 12).map((o, i) => `<article class="stay-card">
+              <div class="stay-photos">${(o.photos || []).slice(0, 6).map((u) => `<img src="${esc(u)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">`).join('') || `<span class="stay-ph">${ms('bed')}</span>`}</div>
+              <div class="stay-body"><b class="ellipsis">${esc(o.title)}</b><small class="ellipsis">${esc(o.subtitle || '')}${o.rating ? ` · ★ ${String(o.rating).replace('.', ',')}` : ''}</small>
+                <div class="row-between"><b>${czk(o.price)}</b><span class="row-actions"><a class="btn ghost sm" href="${esc(o.deepLink)}" target="_blank" rel="noopener">Otevřít</a><button class="btn sm" data-pick="${i}">Přidat</button></span></div></div>
+            </article>`).join('')}</div>` : '<p class="small muted empty-line">Nic jsme nenašli. Zkus jiný termín, Booking.com, nebo zadej vlastní ubytování.</p>';
+          out.querySelectorAll('[data-pick]').forEach((btn) => btn.addEventListener('click', () => {
+            const o = list[btn.dataset.pick];
+            close();
+            run(api(`${tripUrl}/items`, { method: 'POST', body: { kind: 'lodging', data: { ...o, images: (o.photos || []).slice(0, 12), cover: o.photos?.[0] || null, url: o.deepLink, day: a, checkout: b, cost: o.price, persons: Number(n), status: 'booked' } } }));
+          }));
+        } catch (err) { out.innerHTML = `<p class="small muted empty-line">${esc(err.message)}</p>`; }
+      });
+      // Vlastní: fotky a náhled
+      const grid = m.querySelector('#o-photos');
+      const drawPhotos = () => {
+        grid.innerHTML = `${images.map((u, i) => `<button type="button" class="ph${u === coverImg ? ' cover' : ''}" data-ph="${i}" title="Nastavit jako náhled"><img src="${esc(u)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">${u === coverImg ? '<span class="tag dark">Náhled</span>' : ''}<span class="ph-rm" data-rm-ph="${i}" aria-label="Odebrat">${ms('close', 'sm')}</span></button>`).join('')}
+          <button type="button" class="ph add" id="ph-add">${ms('add_photo_alternate')}<small>Přidat fotky</small></button>`;
+        grid.querySelectorAll('[data-ph]').forEach((b) => b.addEventListener('click', (e) => {
+          const i = Number(b.dataset.ph);
+          if (e.target.closest('[data-rm-ph]')) { const [rm] = images.splice(i, 1); if (rm === coverImg) coverImg = images[0] || null; } else coverImg = images[i];
+          drawPhotos();
+        }));
+        grid.querySelector('#ph-add').onclick = async () => {
+          const files = await pickImages({ multiple: true });
+          if (!files.length) return;
+          grid.querySelector('#ph-add').innerHTML = '<small>Nahrávám…</small>';
+          for (const f of files.slice(0, 12)) {
+            try { images.push(await uploadTripImage(trip.id, f)); } catch (err) { toast(err.message); }
+          }
+          coverImg ||= images[0] || null;
+          drawPhotos();
+        };
+      };
+      drawPhotos();
+      bindPlace(m.querySelector('#o-addr'), geo);
+      m.querySelector('#lf').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const fd = new FormData(e.target);
+        const body = { title: fd.get('title'), address: fd.get('place'), day: fd.get('day'), checkout: fd.get('checkout') || null, time: fd.get('time') || null, url: fd.get('url') || null, booking: fd.get('booking'), note: fd.get('note'), images, cover: coverImg, ...geo, ...readPay(e.target) };
+        if (!it) body.status = 'booked';
+        close();
+        run(saveItem(it, 'lodging', body));
+      });
+      bindDel(m, close, it);
+    }, { wide: true });
+  };
+
   $app.querySelectorAll('[data-edit]').forEach((b) => b.addEventListener('click', () => activityModal(items.find((i) => i.id === Number(b.dataset.edit)))));
-  $app.querySelectorAll('[data-quick]').forEach((b) => b.addEventListener('click', () => activityModal(null, { category: b.dataset.quick, day: day || '' })));
+  $app.querySelectorAll('[data-quick]').forEach((b) => b.addEventListener('click', () => {
+    const k = b.dataset.quick;
+    if (k === 'transport') transportModal(null, { day: day || '' });
+    else if (k === 'lodging') lodgingModal(null, { day: day || '' });
+    else activityModal(null, { category: k, day: day || '' });
+  }));
   $app.querySelectorAll('[data-add-day]').forEach((b) => b.addEventListener('click', () => activityModal(null, { day: b.dataset.addDay, category: 'activity' })));
   document.getElementById('suggest')?.addEventListener('click', () => activityModal(null, { category: 'sight', day: '' }));
-  $app.querySelectorAll('[data-vote]').forEach((b) => b.addEventListener('click', () => run(api(`/trips/${trip.id}/items/${b.dataset.vote}/vote`, { method: 'POST' }))));
+  $app.querySelectorAll('[data-vote]').forEach((b) => b.addEventListener('click', () => run(api(`${tripUrl}/items/${b.dataset.vote}/vote`, { method: 'POST', body: { value: Number(b.dataset.v) } }))));
+  $app.querySelectorAll('[data-qr]').forEach((b) => b.addEventListener('click', () => {
+    const it = items.find((i) => i.id === Number(b.dataset.qr));
+    modal(`<h2>${esc(itemTitle(it))}</h2><p class="small muted" style="margin-top:4px">${[it.data.seats, it.data.booking && `rezervace ${it.data.booking}`].filter(Boolean).map(esc).join(' · ')}</p>
+      <img class="qr-big" src="${esc(it.data.qr)}" alt="QR kód jízdenky"><div class="modal-actions center"><button class="btn" data-close>Hotovo</button></div>`);
+  }));
 
-  // Rozpočet
-  document.getElementById('budget-btn')?.addEventListener('click', () => modal(`<h2>Rozpočet výletu</h2>
-    <p class="muted" style="margin-top:6px">Celkem zatím ${czk(total)}. Ceny jednotlivých aktivit upravíš kliknutím na ně.</p>
-    <form id="bf" class="stack-form"><div class="two">
+  // Platby a náklady
+  $app.querySelectorAll('[data-paid]').forEach((b) => b.addEventListener('click', () => run(api(`${tripUrl}/items/${b.dataset.paid}/paid`, { method: 'POST', body: { paid: true } }))));
+  document.getElementById('budget-btn')?.addEventListener('click', () => modal(`<h2>Platby a náklady</h2>
+    <p class="muted" style="margin-top:6px">Každý náklad se rozpočítá mezi lidi, kteří se na něm podílí. Svůj podíl si odškrtni, až ho pošleš${isOwner ? '. Jako organizátor můžeš odškrtávat i za ostatní' : ''}.</p>
+    <div class="people-money">${payers.map((p) => { const x = money.person(p.id); return `<div class="pm">${avatarHtml(p)}<span class="grow"><b class="ellipsis">${esc(p.name)}</b><small>podíl ${czk(x.owe)} · zaplaceno ${czk(x.paid)}</small></span><b class="num">${x.left > 0.5 ? czk(x.left) : '✓'}</b></div>`; }).join('')}</div>
+    <h3 style="margin-top:24px">Položky</h3>
+    <div class="money-rows">${money.rows.sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999')).map((r) => `<div class="mr">
+      <div class="row-between"><span class="grow"><b class="ellipsis">${esc(itemTitle(r.it))}</b><small class="muted">${czk(r.it.price)} · ${r.who.length > 1 ? `${czk(r.share)} na osobu` : 'platí jeden'}</small></span>${dueTag(r.due)}</div>
+      <div class="mr-who">${r.who.map((id) => { const p = payers.find((x) => x.id === id); const paid = r.paid[id]; const can = id === me || isOwner; return `<button class="who${paid ? ' paid' : ''}" ${can ? `data-toggle="${r.it.id}" data-user="${id}" data-on="${paid ? 0 : 1}"` : 'disabled'}>${paid ? ms('check_circle', 'sm') : ms('radio_button_unchecked', 'sm')} ${esc(p?.name.split(' ')[0] || '?')}</button>`; }).join('')}</div>
+    </div>`).join('') || '<p class="small muted empty-line">Zatím žádné náklady. Cenu a termín splatnosti zadáš u každé položky.</p>'}</div>
+    ${canEdit ? `<form id="bf" class="stack-form"><div class="two">
       <div><label for="bf-b">Cílový rozpočet (Kč)</label><input id="bf-b" name="budget" type="number" min="0" step="500" value="${esc(trip.budget ?? '')}" placeholder="bez cíle"></div>
       <div><label for="bf-p">Počet osob</label><input id="bf-p" name="persons" type="number" min="1" max="20" value="${persons}"></div></div>
-      <ul class="legend-list">${items.filter((i) => i.price != null).map((i) => `<li><span class="grow ellipsis">${esc(itemTitle(i))}</span><b class="num">${czk(i.price)}</b></li>`).join('') || '<li class="muted small">Zatím žádné náklady.</li>'}</ul>
-      <div class="modal-actions"><button type="button" class="btn ghost" data-close>Zavřít</button><button class="btn">Uložit</button></div></form>`, (m, close) => {
-    m.querySelector('#bf').addEventListener('submit', (e) => { e.preventDefault(); close(); run(api(`/trips/${trip.id}`, { method: 'PATCH', body: Object.fromEntries(new FormData(e.target)) })); });
-  }));
+      <div class="modal-actions"><button type="button" class="btn ghost" data-close>Zavřít</button><button class="btn">Uložit</button></div></form>` : '<div class="modal-actions"><button class="btn" data-close>Zavřít</button></div>'}`, (m, close) => {
+    m.querySelectorAll('[data-toggle]').forEach((b) => b.addEventListener('click', async () => {
+      try {
+        const d = await api(`${tripUrl}/items/${b.dataset.toggle}/paid`, { method: 'POST', body: { userId: Number(b.dataset.user), paid: b.dataset.on === '1' } });
+        close(); renderTrip(d); document.getElementById('budget-btn')?.click();
+      } catch (err) { toast(err.message); }
+    }));
+    m.querySelector('#bf')?.addEventListener('submit', (e) => { e.preventDefault(); close(); run(api(tripUrl, { method: 'PATCH', body: Object.fromEntries(new FormData(e.target)) })); });
+  }, { wide: true }));
 
   // Lidé a pozvánky
   $app.querySelectorAll('[data-rm]').forEach((b) => {
     b.onclick = async () => {
       if (!confirm('Odebrat z výletu?')) return;
-      const res = await api(`/trips/${trip.id}/members/${b.dataset.rm}`, { method: 'DELETE' }).catch((e) => toast(e.message));
+      const res = await api(`${tripUrl}/members/${b.dataset.rm}`, { method: 'DELETE' }).catch((e) => toast(e.message));
       if (res?.left) { toast('Opustil(a) jsi výlet.'); location.hash = '#/trips'; } else if (res) renderTrip(res);
     };
   });
   const inviteUrl = async () => {
-    const { token } = await api(`/trips/${trip.id}/invite-link`, { method: 'POST' });
+    const { token } = await api(`${tripUrl}/invite-link`, { method: 'POST' });
     trip.invite_token = token;
     return `${location.origin}/#/join/${token}`;
   };
@@ -1692,20 +2051,46 @@ function renderTrip(detail, { shared = false } = {}) {
     const inTrip = new Set(people.map((p) => (p.email || '').toLowerCase()));
     modal(`<h2>Pozvat přátele</h2>
       <p class="muted" style="margin-top:6px">Kdo se přidá, může upravovat program, hlasovat a psát do chatu výletu.</p>
-      ${friends.length ? `<div class="pick-list">${friends.map((f) => `<div class="pick"><span class="avatar">${esc(initials(f.name))}</span><span class="grow"><b>${esc(f.name)}</b><small>${esc(f.email)}</small></span>
+      ${friends.length ? `<div class="pick-list">${friends.map((f) => `<div class="pick">${avatarHtml(f)}<span class="grow"><b>${esc(f.name)}</b><small>${esc(f.email)}</small></span>
         ${inTrip.has(f.email.toLowerCase()) ? '<span class="tag">Ve výletu</span>' : `<button class="btn sm" data-add-friend="${esc(f.email)}">Pozvat</button>`}</div>`).join('')}</div>` : ''}
       <form id="inv" class="inline-form"><input name="email" type="email" placeholder="e-mail kamaráda" required><select name="role"><option value="editor">Editor</option><option value="viewer">Prohlížení</option></select><button class="btn">Pozvat</button></form>
       <div class="divider"><span>nebo</span></div>
       <button class="btn soft wide" id="inv-link">${ms('link')} Zkopírovat odkaz pro přidání</button>`, (m, close) => {
-      const add = (email, role = 'editor') => api(`/trips/${trip.id}/members`, { method: 'POST', body: { email, role } }).then((d) => { close(); renderTrip(d); toast('Pozvánka přidána'); }).catch((e) => toast(e.message));
+      const add = (email, r = 'editor') => api(`${tripUrl}/members`, { method: 'POST', body: { email, role: r } }).then((d) => { close(); renderTrip(d); toast('Pozvánka přidána'); }).catch((e) => toast(e.message));
       m.querySelectorAll('[data-add-friend]').forEach((b) => { b.onclick = () => add(b.dataset.addFriend); });
       m.querySelector('#inv').addEventListener('submit', (e) => { e.preventDefault(); add(e.target.email.value, e.target.role.value); });
       m.querySelector('#inv-link').onclick = async () => { const url = await inviteUrl(); close(); shareLink(trip.title, url); };
     });
   });
 
+  // Náhledový obrázek výletu
+  const coverModal = () => {
+    const candidates = [...new Set([
+      ...places.filter((p) => p.data.destinationId).map((p) => photoSrc(p.data.destinationId, 960)),
+      ...items.flatMap((i) => [i.data.cover, i.data.image, ...(i.data.images || [])]).filter(Boolean),
+    ])];
+    let chosen = trip.cover || null;
+    modal(`<h2>Náhledový obrázek výletu</h2><p class="muted" style="margin-top:6px">Zobrazí se v seznamu výletů. Vyber fotku, nebo nahraj vlastní.</p>
+      <div class="photo-grid big" id="cv-grid"></div>
+      <div class="modal-actions"><button type="button" class="btn ghost" id="cv-clear">Bez obrázku</button><span class="grow"></span><button type="button" class="btn ghost" data-close>Zrušit</button><button class="btn" id="cv-save">Uložit</button></div>`, (m, close) => {
+      const grid = m.querySelector('#cv-grid');
+      const draw = () => {
+        grid.innerHTML = `${candidates.map((u, i) => `<button type="button" class="ph${u === chosen ? ' cover' : ''}" data-ph="${i}"><img src="${esc(u)}" alt="" referrerpolicy="no-referrer" onerror="this.parentElement.remove()">${u === chosen ? '<span class="tag dark">Náhled</span>' : ''}</button>`).join('')}
+          <button type="button" class="ph add" id="cv-up">${ms('add_photo_alternate')}<small>Nahrát</small></button>`;
+        grid.querySelectorAll('[data-ph]').forEach((b) => b.addEventListener('click', () => { chosen = candidates[b.dataset.ph]; draw(); }));
+        grid.querySelector('#cv-up').onclick = async () => {
+          const [f] = await pickImages(); if (!f) return;
+          try { const u = await uploadTripImage(trip.id, f); candidates.unshift(u); chosen = u; draw(); } catch (err) { toast(err.message); }
+        };
+      };
+      draw();
+      m.querySelector('#cv-clear').onclick = () => { close(); run(api(tripUrl, { method: 'PATCH', body: { cover: null } })); };
+      m.querySelector('#cv-save').onclick = () => { close(); run(api(tripUrl, { method: 'PATCH', body: { cover: chosen } })); };
+    }, { wide: true });
+  };
+
   // Sdílení náhledu, další možnosti
-  const share = (enabled) => api(`/trips/${trip.id}/share`, { method: 'POST', body: { enabled } }).then(() => api(`/trips/${trip.id}`));
+  const share = (enabled) => api(`${tripUrl}/share`, { method: 'POST', body: { enabled } }).then(() => api(tripUrl));
   document.getElementById('share-btn')?.addEventListener('click', async () => {
     const d = trip.share_token ? detail : await share(true);
     if (!trip.share_token) renderTrip(d);
@@ -1714,24 +2099,26 @@ function renderTrip(detail, { shared = false } = {}) {
   document.getElementById('more-btn')?.addEventListener('click', () => modal(`<h2>${esc(trip.title)}</h2>
     <div class="menu-list">
       ${canEdit ? `<button data-act="edit">${ms('edit')} Upravit název, termín a poznámku</button>` : ''}
-      ${mainPlace?.destinationId ? `<a href="${dHref(mainPlace.destinationId)}">${ms('travel_explore')} Najít spoje a ubytování</a>` : `<a href="#/">${ms('travel_explore')} Vybrat destinaci</a>`}
+      ${canEdit ? `<button data-act="cover">${ms('image')} Náhledový obrázek výletu</button>` : ''}
+      ${mainPlace?.destinationId ? `<a href="${dHref(mainPlace.destinationId)}">${ms('travel_explore')} Porovnat ceny dopravy a ubytování</a>` : `<a href="#/">${ms('travel_explore')} Vybrat destinaci</a>`}
       <a href="#/chat/t/${trip.id}">${ms('chat_bubble')} Chat výletu</a>
       ${isOwner && trip.share_token ? `<button data-act="unshare">${ms('link_off')} Zrušit veřejný náhled</button>` : ''}
       ${isOwner ? (trip.status === 'done' ? `<button data-act="reopen">${ms('undo')} Vrátit mezi plánované</button>` : `<button data-act="complete">${ms('task_alt')} Dokončit výlet</button>`) : ''}
-      ${places.length && canEdit ? places.map((p) => `<button data-act="rm-place" data-id="${p.id}">${ms('wrong_location')} Odebrat cíl ${esc(p.data.title || p.data.name)}</button>`).join('') : ''}
+      ${places.length && canEdit ? places.map((p) => `<button data-act="rm-place" data-id="${p.id}">${ms('wrong_location')} Odebrat cíl ${esc(placeName(p.data))}</button>`).join('') : ''}
       ${isOwner ? `<button class="danger" data-act="delete">${ms('delete')} Smazat výlet</button>` : ''}
     </div>`, (m, close) => {
     m.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', async () => {
       close();
       const act = b.dataset.act;
       if (act === 'edit') editTrip();
+      if (act === 'cover') coverModal();
       if (act === 'unshare') run(share(false));
-      if (act === 'reopen') run(api(`/trips/${trip.id}/status`, { method: 'POST', body: { status: 'planned' } }));
-      if (act === 'rm-place') run(api(`/trips/${trip.id}/items/${b.dataset.id}`, { method: 'DELETE' }));
+      if (act === 'reopen') run(api(`${tripUrl}/status`, { method: 'POST', body: { status: 'planned' } }));
+      if (act === 'rm-place') run(api(`${tripUrl}/items/${b.dataset.id}`, { method: 'DELETE' }));
       if (act === 'complete') completeTrip();
       if (act === 'delete') {
         if (!confirm(`Opravdu smazat výlet „${trip.title}“?`)) return;
-        await api(`/trips/${trip.id}`, { method: 'DELETE' });
+        await api(tripUrl, { method: 'DELETE' });
         toast('Výlet smazán.'); location.hash = '#/trips';
       }
     }));
@@ -1743,7 +2130,7 @@ function renderTrip(detail, { shared = false } = {}) {
       <div class="modal-actions center"><button class="btn ghost" data-close>Ještě ne</button><button class="btn" id="yes">Ano, dokončit</button></div>`, (m, close) => {
       m.querySelector('#yes').onclick = async () => {
         close();
-        await run(api(`/trips/${trip.id}/status`, { method: 'POST', body: { status: 'done' } }));
+        await run(api(`${tripUrl}/status`, { method: 'POST', body: { status: 'done' } }));
         toast('Gratulujeme! Razítka najdeš ve svém profilu.');
         celebrate();
       };
@@ -1754,11 +2141,11 @@ function renderTrip(detail, { shared = false } = {}) {
   const mapData = tripMapData(items);
   if (mapData.points.length || mapData.segments.length) {
     document.getElementById('trip-map-card').hidden = false;
-    drawMap(document.getElementById('trip-map'), mapData);
+    drawMap(document.getElementById('trip-map'), { ...mapData, legend: false });
   }
   const geo = places.find((p) => Number.isFinite(p.data.lat))?.data;
   if (mainPlace?.destinationId) loadTripWeather(mainPlace);
-  if (geo) loadTip(geo, Math.max(0, days.indexOf(day)), canEdit ? (p) => run(api(`/trips/${trip.id}/items`, { method: 'POST', body: { kind: 'note', data: { title: p.title, note: p.description || '', category: 'sight', lat: p.lat, lng: p.lng, image: p.thumb } } })) : null);
+  if (geo) loadTip(geo, Math.max(0, days.indexOf(day)), role !== 'viewer' && !shared ? (p) => run(api(`${tripUrl}/items`, { method: 'POST', body: { kind: 'note', data: { title: p.title, note: p.description || '', category: 'sight', lat: p.lat, lng: p.lng, image: p.thumb } } })) : null);
 }
 
 async function loadTripWeather(place) {
@@ -1784,7 +2171,7 @@ async function loadTip(geo, index, onAdd) {
     box.hidden = false;
     box.innerHTML = `${p.thumb ? `<img src="${esc(p.thumb)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}
       <div class="tip-txt"><span class="eyebrow">Tip dne</span><b>${esc(p.title)}</b>${p.description ? `<small>${esc(p.description)}</small>` : ''}
-      ${onAdd ? `<button class="btn sm light" id="tip-add">${ms('add', 'sm')} Do nápadů</button>` : ''}</div>`;
+      ${onAdd ? `<button class="btn sm light" id="tip-add">${ms('add', 'sm')} Navrhnout partě</button>` : ''}</div>`;
     document.getElementById('tip-add')?.addEventListener('click', () => onAdd(p));
   } catch { /* bez tipu */ }
 }
@@ -1860,14 +2247,30 @@ async function viewAccount() {
   if (!requireLogin()) return;
   $app.innerHTML = `<div class="profile">
     <div class="glass-card profile-card">
-      <span class="avatar" style="width:72px;height:72px;font-size:24px">${esc(initials(state.user.name))}</span>
-      <div class="grow"><h1>${esc(state.user.name)}</h1><p class="muted">${esc(state.user.email)}</p></div>
+      <div class="avatar-edit">${avatarHtml(state.user, 'xl')}
+        <button class="avatar-cam" id="av-up" aria-label="Nahrát profilovou fotku" title="Nahrát profilovou fotku">${ms('photo_camera', 'sm')}</button></div>
+      <div class="grow"><h1>${esc(state.user.name)}</h1><p class="muted">${esc(state.user.email)}</p>
+        <div class="row-actions" style="margin-top:10px"><button class="btn soft sm" id="av-up2">${ms('photo_camera', 'sm')} ${state.user.avatar_v ? 'Změnit fotku' : 'Nahrát profilovou fotku'}</button>${state.user.avatar_v ? '<button class="btn ghost sm" id="av-rm">Odebrat</button>' : ''}</div></div>
       <div class="actions"><a class="btn sky" href="#/trips">Moje výlety</a><button class="btn danger" id="lo">Odhlásit se</button></div>
     </div>
     <div id="profile-edit"><div class="skeleton" style="height:320px;margin-top:24px"></div></div>
     <div id="passport"><div class="skeleton" style="height:240px;margin-top:24px"></div></div>
   </div>`;
   document.getElementById('lo').onclick = logout;
+  const upload = async () => {
+    const [f] = await pickImages(); if (!f) return;
+    try {
+      const image = await imageToDataUrl(f, { max: 320, square: true, quality: 0.86 });
+      const { avatar_v } = await api('/me/avatar', { method: 'PUT', body: { image } });
+      state.user.avatar_v = avatar_v; renderAccount(); viewAccount(); toast('Profilová fotka uložena');
+    } catch (err) { toast(err.message); }
+  };
+  document.getElementById('av-up').onclick = upload;
+  document.getElementById('av-up2').onclick = upload;
+  document.getElementById('av-rm')?.addEventListener('click', async () => {
+    await api('/me/avatar', { method: 'DELETE' }).catch((e) => toast(e.message));
+    state.user.avatar_v = 0; renderAccount(); viewAccount();
+  });
   profileBlock(document.getElementById('profile-edit')).catch(() => {});
   document.getElementById('passport').innerHTML = await passportBlock();
 }
@@ -1892,7 +2295,7 @@ async function init() {
   window.addEventListener('hashchange', route);
   route();
 }
-setupSocial({ api, esc, toast, state, $app, initials, requireLogin, emptyState, route, modal, renderAccount, shareLink, czk, fmtRange });
+setupSocial({ api, esc, toast, state, $app, initials, avatarHtml, requireLogin, emptyState, route, modal, renderAccount, shareLink, czk, fmtRange });
 init();
 
 if ('serviceWorker' in navigator) {

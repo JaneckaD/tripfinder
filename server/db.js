@@ -7,6 +7,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { PROFILE_MIGRATIONS, SOCIAL_SCHEMA } from './social.js';
 import { PLANNER_MIGRATIONS, PLANNER_SCHEMA } from './planner.js';
+import { MEDIA_MIGRATIONS, MEDIA_SCHEMA } from './media.js';
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS users (
@@ -87,8 +88,9 @@ export async function openDb({
   await client.executeMultiple(SCHEMA);
   await client.executeMultiple(SOCIAL_SCHEMA);
   await client.executeMultiple(PLANNER_SCHEMA);
+  await client.executeMultiple(MEDIA_SCHEMA);
   // Migrace: sloupce přidané později (ALTER selže, když už existují – to je v pořádku).
-  for (const sql of ['ALTER TABLE trips ADD COLUMN budget REAL', "ALTER TABLE trips ADD COLUMN status TEXT NOT NULL DEFAULT 'planned'", 'ALTER TABLE trips ADD COLUMN completed_at TEXT', ...PROFILE_MIGRATIONS, ...PLANNER_MIGRATIONS]) {
+  for (const sql of ['ALTER TABLE trips ADD COLUMN budget REAL', "ALTER TABLE trips ADD COLUMN status TEXT NOT NULL DEFAULT 'planned'", 'ALTER TABLE trips ADD COLUMN completed_at TEXT', ...PROFILE_MIGRATIONS, ...PLANNER_MIGRATIONS, ...MEDIA_MIGRATIONS]) {
     try { await client.execute(sql); } catch { /* sloupec už existuje */ }
   }
 
