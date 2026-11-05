@@ -110,11 +110,24 @@ export function resolveOrigin(origin) {
 const norm = (s) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
 
 // Našeptávač: nejdřív katalog (české názvy), pak Photon (celý svět, i adresy).
+// Rychlá paměť v procesu: opakované dotazy (i při psaní a mazání) se vrátí hned bez databáze a sítě.
+const MEM = new Map(); const MEM_MAX = 2000; const MEM_TTL = 6 * 3600000;
 export function makePlaceSearch(cached) {
   return async function searchPlaces(q, { limit = 8 } = {}) {
     const query = q.trim();
     if (query.length < 2) return [];
     const nq = norm(query);
+    const key = `${nq}|${limit}`;
+    const hit = MEM.get(key);
+    if (hit && hit.until > Date.now()) return hit.value;
+    const value = await searchUncached(query, nq, limit);
+    if (value.length) {
+      if (MEM.size >= MEM_MAX) MEM.delete(MEM.keys().next().value);
+      MEM.set(key, { value, until: Date.now() + MEM_TTL });
+    }
+    return value;
+  };
+  async function searchUncached(query, nq, limit) {
     const catalog = DESTINATIONS
       .filter((d) => norm(d.name).includes(nq) || norm(d.country).includes(nq))
       .slice(0, 4)
@@ -124,7 +137,7 @@ export function makePlaceSearch(cached) {
     try {
       const res = await cached(`photon:${nq}`, 7 * 86400000, () => getJson(
         `https://photon.komoot.io/api/?${new URLSearchParams({ q: query, limit: '10' })}`,
-        { headers: { 'User-Agent': 'TripFinder/0.1 (https://github.com/JaneckaD/tripfinder)' }, timeoutMs: 8000 },
+        { headers: { 'User-Agent': 'TripFinder/0.1 (https://github.com/JaneckaD/tripfinder)' }, timeoutMs: 5000 },
       ));
       world = (res.features || []).map((f) => {
         const p = f.properties || {};
@@ -153,7 +166,7 @@ export function makePlaceSearch(cached) {
       out.push(p);
     }
     return out.slice(0, limit);
-  };
+  }
 }
 
 export { AIRPORTS };

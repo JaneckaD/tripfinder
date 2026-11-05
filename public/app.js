@@ -1,6 +1,6 @@
 // TripFinder – frontend (vanilla JS, bez build kroku). Jednoduchý hash router.
 import { setupSocial, loadProfile, profileBlock, profileHints, ageDiscount, applyHomeOrigin, refreshBadge, viewWelcome, viewChat, viewInvite } from './social.js';
-import { ms, autocomplete, calendar, guestsPicker, drawMap, loadLeaflet, baseTiles, stampSvg, touchMapOptions, twoFingerHint, MODE_STYLE, POPULAR_ORIGINS, shortDate, closePopover, pickImages, imageToDataUrl } from './widgets.js';
+import { autoDatePickers, ms, autocomplete, calendar, guestsPicker, drawMap, loadLeaflet, baseTiles, stampSvg, touchMapOptions, twoFingerHint, MODE_STYLE, POPULAR_ORIGINS, shortDate, closePopover, pickImages, imageToDataUrl } from './widgets.js';
 
 const $app = document.getElementById('app');
 const state = { user: undefined, meta: null, all: [], photos: {}, search: loadSearch(), roundtrip: loadRoundtrip() };
@@ -128,7 +128,7 @@ function modal(html, onMount, { wide = false } = {}) {
   const root = document.getElementById('modal-root');
   closePopover();
   root.innerHTML = `<div class="modal-backdrop"><div class="modal${wide ? ' wide' : ''}" role="dialog" aria-modal="true">${html}</div></div>`;
-  const close = () => { root.innerHTML = ''; document.removeEventListener('keydown', onKey); };
+  const close = () => { root.innerHTML = ''; document.removeEventListener('keydown', onKey); if (tripRefreshPending) setTimeout(refreshOpenTrip, 400); };
   const onKey = (e) => e.key === 'Escape' && close();
   document.addEventListener('keydown', onKey);
   root.querySelector('.modal-backdrop').addEventListener('click', (e) => e.target === e.currentTarget && close());
@@ -144,8 +144,25 @@ async function shareLink(title, url) {
   toast('Odkaz zkopírován');
 }
 
+// ---------- Živé změny (SSE) ----------
+// Server pošle událost, když někdo napíše do chatu nebo změní výlet; stránky se hned obnoví.
+let liveSource = null;
+function connectLive() {
+  if (!state.user) { liveSource?.close(); liveSource = null; state.live = false; return; }
+  if (liveSource || !('EventSource' in window)) return;
+  liveSource = new EventSource('/api/events');
+  liveSource.onopen = () => { state.live = true; };
+  liveSource.onerror = () => { state.live = false; };
+  liveSource.onmessage = (e) => {
+    let d; try { d = JSON.parse(e.data); } catch { return; }
+    if (d.type === 'chat' || d.type === 'dm') refreshBadge();
+    window.dispatchEvent(new CustomEvent('tf:live', { detail: d }));
+  };
+}
+
 // ---------- Hlavička ----------
 function renderAccount() {
+  connectLive();
   const el = document.getElementById('account');
   const bottom = document.getElementById('bottom-account');
   el.innerHTML = `<button class="btn sm hdr-new" data-new-trip>${ms('add', 'sm')} Vytvořit výlet</button>${state.user
@@ -1321,7 +1338,7 @@ async function passportBlock() {
     return `<section class="passport">
       <div class="passport-head"><div><span class="eyebrow">Cestovatelský pas</span><h2>${stamps.length ? `${plural(stamps.length, 'země', 'země', 'zemí')} v pasu` : 'Zatím prázdný pas'}</h2></div>
         <span class="small muted">${stamps.length ? 'Razítko dostaneš za každou zemi z výletu, který označíš jako dokončený.' : 'Dokonči výlet (tlačítko „Dokončit výlet“ v plánovači) a získáš razítko každé navštívené země.'}</span></div>
-      <div class="stamps">${stamps.map((x, i) => `<div class="stamp" title="${esc(`${x.country} – ${x.tripTitle}`)}" style="--rot:${((i * 37) % 13) - 6}deg">${stampSvg(x)}<span class="small muted">${esc(x.place || x.country)}</span></div>`).join('')
+      <div class="stamps">${stamps.map((x, i) => `<a class="stamp" href="#/trips/${x.tripId}" title="${esc(`${x.country} – ${x.tripTitle}`)}" style="--rot:${((i * 37) % 13) - 6}deg"><span class="stamp-art">${stampSvg(x)}</span><span class="stamp-name"><b>${esc(x.country)}</b><small>${esc(x.place && !/^geo:/.test(x.place) && x.place !== x.country ? x.place : x.tripTitle)}</small></span></a>`).join('')
         || `<div class="stamp ghost-stamp">${stampSvg({ cc: 'CZ', country: 'Tvoje první země', date: '' })}</div>`}</div>
     </section>`;
   } catch { return ''; }
@@ -1375,7 +1392,7 @@ const tripForm = (t = {}) => `
   <div><label for="t">Název</label><input id="t" name="title" required placeholder="např. Jarní Lisabon 2027" value="${esc(t.title || '')}"></div>
   <div class="two">
     <div><label for="sd">Od</label><input id="sd" name="start_date" type="date" value="${esc(t.start_date ?? state.search.from)}"></div>
-    <div><label for="ed">Do</label><input id="ed" name="end_date" type="date" value="${esc(t.end_date ?? state.search.to)}"></div>
+    <div><label for="ed">Do</label><input id="ed" name="end_date" type="date" data-after="sd" value="${esc(t.end_date ?? state.search.to)}"></div>
   </div>
   <div class="two">
     <div><label for="p">Počet osob</label><input id="p" name="persons" type="number" min="1" max="20" value="${esc(t.persons ?? state.search.persons)}"></div>
@@ -1536,6 +1553,21 @@ async function viewTrip(id) {
   if (!requireLogin()) return;
   renderTrip(await api(`/trips/${id}`));
 }
+// Výlet otevřený v plánovači se obnoví, když ho upraví někdo jiný (okno s formulářem se nepřeruší).
+let tripRefreshPending = false;
+const refreshOpenTrip = async () => {
+  const m = /^#\/trips\/(\d+)/.exec(location.hash);
+  if (!m || !document.querySelector('.planner-head')) return;
+  if (document.querySelector('#modal-root .modal')) { tripRefreshPending = true; return; }
+  tripRefreshPending = false;
+  const d = await api(`/trips/${m[1]}`).catch(() => null);
+  if (d && location.hash.startsWith(`#/trips/${m[1]}`)) { const y = window.scrollY; renderTrip(d); window.scrollTo(0, y); }
+};
+window.addEventListener('tf:live', (e) => {
+  const d = e.detail;
+  if (d.by === state.user?.id || (d.type !== 'trip' && d.type !== 'chat')) return;
+  if (d.type === 'trip' && location.hash.startsWith(`#/trips/${d.tripId}`)) refreshOpenTrip();
+});
 
 function renderTrip(detail, { shared = false } = {}) {
   const { trip, role, owner, items, members, total } = detail;
@@ -1814,7 +1846,7 @@ function renderTrip(detail, { shared = false } = {}) {
         </div>
         <div class="two dt">
           <div><label for="t-dep">Odjezd</label><input id="t-dep" name="depart" type="datetime-local" value="${esc(d.depart || `${dayDefault}T08:00`)}" required></div>
-          <div><label for="t-arr">Příjezd</label><input id="t-arr" name="arrive" type="datetime-local" value="${esc(d.arrive || '')}"></div>
+          <div><label for="t-arr">Příjezd</label><input id="t-arr" name="arrive" type="datetime-local" data-after="t-dep" value="${esc(d.arrive || '')}"></div>
         </div>
         <div class="two">
           <div><label for="t-seats">Místa</label><input id="t-seats" name="seats" maxlength="120" value="${esc(d.seats || '')}" placeholder="vůz 5, sedadla 21–24"></div>
@@ -1923,7 +1955,7 @@ function renderTrip(detail, { shared = false } = {}) {
       <div id="tab-bnb" ${it ? 'hidden' : ''}>
         <form id="ls" class="stack-form">
           <div class="ac-wrap"><label for="l-where">Kde</label><input id="l-where" value="${esc(destName)}" placeholder="Město nebo čtvrť" autocomplete="off" required></div>
-          <div class="three"><div><label for="l-in">Příjezd</label><input id="l-in" type="date" value="${checkin}" required></div><div><label for="l-out">Odjezd</label><input id="l-out" type="date" value="${checkout}" required></div><div><label for="l-n">Hosté</label><input id="l-n" type="number" min="1" max="16" value="${payers.length || persons}"></div></div>
+          <div class="three"><div><label for="l-in">Příjezd</label><input id="l-in" type="date" value="${checkin}" required></div><div><label for="l-out">Odjezd</label><input id="l-out" type="date" data-after="l-in" value="${checkout}" required></div><div><label for="l-n">Hosté</label><input id="l-n" type="number" min="1" max="16" value="${payers.length || persons}"></div></div>
           <button class="btn">${ms('search', 'sm')} Hledat na Airbnb</button>
         </form>
         <div id="l-out-list"></div>
@@ -1936,7 +1968,7 @@ function renderTrip(detail, { shared = false } = {}) {
         <form id="lf" class="stack-form">
           <div><label for="o-title">Název</label><input id="o-title" name="title" required maxlength="160" value="${esc(d.title || '')}" placeholder="např. Apartmán v Alfamě"></div>
           ${placeField(d, 'Adresa', 'o-addr')}
-          <div class="three"><div><label for="o-in">Příjezd</label><input id="o-in" name="day" type="date" value="${checkin}" required></div><div><label for="o-out">Odjezd</label><input id="o-out" name="checkout" type="date" value="${checkout}"></div><div><label for="o-time">Check-in</label><input id="o-time" name="time" type="time" value="${esc(d.time || '')}"></div></div>
+          <div class="three"><div><label for="o-in">Příjezd</label><input id="o-in" name="day" type="date" value="${checkin}" required></div><div><label for="o-out">Odjezd</label><input id="o-out" name="checkout" type="date" data-after="o-in" value="${checkout}"></div><div><label for="o-time">Check-in</label><input id="o-time" name="time" type="time" value="${esc(d.time || '')}"></div></div>
           <div class="two"><div><label for="o-url">Odkaz (Booking, Airbnb…)</label><input id="o-url" name="url" type="url" value="${esc(d.url || d.deepLink || '')}" placeholder="https://…"></div><div><label for="o-book">Rezervace / kód</label><input id="o-book" name="booking" maxlength="80" value="${esc(d.booking || '')}"></div></div>
           <div><span class="label">Fotky · klikni na fotku a nastav ji jako náhled</span><div class="photo-grid" id="o-photos"></div></div>
           ${payFields(d)}
@@ -2320,6 +2352,7 @@ async function init() {
   window.addEventListener('hashchange', route);
   route();
 }
+autoDatePickers();
 setupSocial({ api, esc, toast, state, $app, initials, avatarHtml, requireLogin, emptyState, route, modal, renderAccount, shareLink, czk, fmtRange, ACT_CATS, CAT_COLOR, itemCat, itemWhen, itemTitle, itemImage, tripMoney, tripDays });
 init();
 

@@ -873,8 +873,7 @@ a:hover { text-decoration: none; opacity: .75; }
 main { max-width: 1200px; padding: 24px 16px 72px; }
 @media (min-width: 768px) { main { padding: 40px 24px 96px; } }
 @media (min-width: 1024px) { main { padding: 48px 24px 112px; } }
-.site-footer { border-top: 1px solid var(--hairline); background: #fff; margin-bottom: calc(84px + env(safe-area-inset-bottom)); }
-@media (min-width: 768px) { .site-footer { margin-bottom: 0; } }
+.site-footer { border-top: 1px solid var(--hairline); background: #fff; }
 .footer-in { max-width: 1200px; margin: 0 auto; padding: 28px 24px; display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; align-items: center; font-size: 13px; color: var(--text-2); }
 .footer-in nav { display: flex; gap: 24px; flex-wrap: wrap; }
 .footer-in a { color: var(--text); font-weight: 500; }
@@ -1329,7 +1328,6 @@ div.tl-card { cursor: default; }
   .segnav { display: none; }
   .bottomnav { display: flex; }
   body { padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
-  .site-footer { margin-bottom: calc(84px + env(safe-area-inset-bottom)); }
 }
 @media (max-width: 899px) {
   main:has(.chat-page.has-active) .chat-hero { display: none; }
@@ -1459,12 +1457,6 @@ div.tl-card { cursor: default; }
 @media (max-width: 560px) { .modal .two.dt { grid-template-columns: 1fr; } }
 @media (max-width: 560px) { .tl-card.has-img { grid-template-columns: minmax(0, 1fr); } .tl-img { width: 100%; height: 140px; } }
 
-/* Patička: pozvánka k vytvoření výletu */
-.footer-cta { max-width: 1200px; margin: 0 auto; padding: 32px 16px 0; }
-@media (min-width: 768px) { .footer-cta { padding: 40px 24px 0; } }
-.site-footer .cta-band { margin-top: 0; padding: 32px 28px; }
-@media (min-width: 768px) { .site-footer .cta-band { padding: 44px 56px; } }
-.site-footer .footer-in { padding-top: 24px; }
 main { padding-bottom: 40px; }
 
 /* ---------- Chat: ankety, kalendář, dotazník, sdílení z plánu ---------- */
@@ -1564,3 +1556,67 @@ main { padding-bottom: 40px; }
 .q-tile { justify-items: center; text-align: center; padding: 12px 6px; }
 .q-tile small { display: none; }
 .q-tile b { font-size: 12px; line-height: 16px; }
+.msg.pending .bubble { opacity: .55; }
+
+/* ---------- Vlastní výběr data ---------- */
+.dp { display: flex; gap: 8px; min-width: 0; }
+.dp-btn { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; text-align: left; background: #fff; border: 1px solid var(--hairline-2); border-radius: 12px; font: inherit; font-size: 15px; padding: 12px 14px; color: #111; cursor: pointer; white-space: nowrap; overflow: hidden; }
+.dp-btn span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.dp-btn .ms { color: var(--text-2); flex: none; }
+.dp-btn.empty { color: var(--text-3); }
+.dp-btn:hover { border-color: #c7c7cc; }
+.dp-btn:focus-visible { outline: none; border-color: #111; box-shadow: 0 0 0 3px rgba(0, 0, 0, .06); }
+.dp-time { width: 116px; flex: none; }
+.popover.dp-pop { width: 340px; max-width: calc(100vw - 24px); padding: 16px; z-index: 300; border-radius: 24px; border: 1px solid var(--hairline); }
+.popover.dp-pop.sheet { width: auto; max-width: none; z-index: 300; padding: 20px 16px calc(20px + env(safe-area-inset-bottom)); }
+.dp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.dp-head .cal-nav { display: grid; place-items: center; width: 36px; height: 36px; flex: none; }
+.dp-title { display: flex; gap: 6px; min-width: 0; }
+.dp-title select { width: auto; padding: 8px 30px 8px 12px; font-size: 14px; font-weight: 600; border-radius: 10px; background-color: var(--fill); border-color: transparent; background-position: right 10px center; }
+.dp-pop .cal-dow { font-size: 11px; color: var(--text-3); text-align: center; margin-bottom: 4px; }
+.dp-days { gap: 2px 0; }
+.dp-days button { font-weight: 500; }
+.dp-days button.start, .dp-days button.end { background: #111; color: #fff; border-radius: 50%; }
+.dp-days button.start:hover, .dp-days button.end:hover { background: #111; }
+.dp-days button.anchor { box-shadow: inset 0 0 0 1.5px #111; }
+.dp-days button.in { background: var(--fill); border-radius: 0; }
+.dp-days button.past { color: #d1d1d6; text-decoration: none; }
+.dp-days button.today:not(.start) { box-shadow: inset 0 0 0 1.5px #c7c7cc; }
+.dp-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 10px; }
+
+/* Patička: méně prázdného místa */
+.footer-in { padding: 20px 24px; }
+.ac-list.loading { opacity: .7; }
+
+/* ---------- Cestovatelský pas ---------- */
+.passport { overflow: hidden; padding: 20px 16px; }
+@media (min-width: 640px) { .passport { padding: 28px; } }
+.stamps { grid-template-columns: repeat(auto-fill, minmax(min(132px, 42vw), 1fr)); gap: 20px 14px; }
+@media (min-width: 640px) { .stamps { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 28px 20px; } }
+.stamp { min-width: 0; padding: 6px; border-radius: 20px; transition: background .2s; }
+.stamp:hover { text-decoration: none; background: var(--fill); }
+.stamp-art { display: grid; place-items: center; width: 100%; transform: rotate(var(--rot, 0deg)); }
+.stamp, .stamp:hover { transform: none; }
+.stamp svg, .stamp-svg { filter: none; opacity: .92; width: 100%; max-width: 160px; }
+.stamp-name { display: grid; justify-items: center; text-align: center; min-width: 0; width: 100%; }
+.stamp-name b, .stamp-name small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stamp-name b { font-size: 13px; line-height: 18px; font-weight: 600; color: #111; }
+.stamp-name small { font-size: 11px; line-height: 15px; color: var(--text-2); }
+.ghost-stamp .stamp-art, .ghost-stamp > svg { opacity: .3; }
+
+/* ---------- Vlajky a výběr státu ---------- */
+img.flag { width: 20px; height: 15px; border-radius: 3px; object-fit: cover; vertical-align: -2px; box-shadow: 0 0 0 1px rgba(0, 0, 0, .08); flex: none; display: inline-block; }
+.chip img.flag { margin-right: 2px; }
+.cpick { width: 100%; display: flex; align-items: center; gap: 10px; background: #fff; border: 1px solid var(--hairline-2); border-radius: 12px; font: inherit; font-size: 15px; padding: 12px 14px; color: #111; cursor: pointer; text-align: left; min-width: 0; }
+.cpick span:not(.ms) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cpick.empty { color: var(--text-3); }
+.cpick .ms { color: var(--text-2); }
+.popover.cp-pop { width: 320px; max-width: calc(100vw - 24px); padding: 12px; z-index: 300; border-radius: 22px; border: 1px solid var(--hairline); }
+.cp-q { margin-bottom: 8px; }
+.cp-list { max-height: 300px; overflow: auto; display: grid; gap: 2px; }
+.popover.sheet .cp-list { max-height: 60vh; }
+.cp-row { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: 0; background: transparent; border-radius: 10px; font: inherit; font-size: 14px; text-align: left; color: #111; cursor: pointer; }
+.cp-row:hover, .cp-row:focus-visible { background: var(--fill); outline: none; }
+.add-chip { border-style: dashed; }
+.dp input.dp-time, .modal .dp input.dp-time { width: 112px; flex: none; padding-left: 12px; padding-right: 8px; }
+.popover.cp-pop.sheet { width: auto; max-width: none; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); }

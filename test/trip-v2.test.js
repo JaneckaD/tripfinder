@@ -9,7 +9,7 @@ before(async () => {
   await new Promise((r) => server.once('listening', r));
   base = `http://localhost:${server.address().port}/api`;
 });
-after(() => server.close());
+after(() => { server.closeAllConnections?.(); server.close(); });
 function client() {
   let cookie = '';
   return async (path, { method = 'GET', body } = {}) => {
@@ -121,4 +121,24 @@ test('chat výletu: anketa, kalendářní anketa, dotazník a sdílení z plánu
   // cena za osobu
   const it = (await a(`/trips/${trip.id}/items/${d.items[0].id}`, { method: 'PATCH', body: { cost: 600, priceMode: 'person', unitCost: 300, category: 'nature' } })).body.items[0];
   assert.deepEqual([it.price, it.data.priceMode, it.data.unitCost, it.data.category], [600, 'person', 300, 'nature']);
+});
+
+test('živé změny: člen výletu dostane událost hned po zprávě v chatu', async () => {
+  let cookieB = '';
+  const a = client();
+  await register(a, 'live1');
+  const resB = await fetch(`${base}/auth/register`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'live2', email: 'live2@p.cz', password: 'heslo12345' }) });
+  cookieB = resB.headers.get('set-cookie').split(';')[0];
+  const { trip } = (await a('/trips', { method: 'POST', body: { title: 'Živě' } })).body;
+  await a(`/trips/${trip.id}/members`, { method: 'POST', body: { email: 'live2@p.cz' } });
+  const ctrl = new AbortController();
+  const es = await fetch(`${base}/events`, { headers: { cookie: cookieB }, signal: ctrl.signal });
+  assert.match(es.headers.get('content-type'), /text\/event-stream/);
+  const reader = es.body.getReader();
+  await reader.read(); // retry:
+  await a(`/trips/${trip.id}/chat`, { method: 'POST', body: { body: 'Ahoj' } });
+  let text = '';
+  while (!text.includes('"type":"chat"')) text += new TextDecoder().decode((await reader.read()).value);
+  assert.match(text, new RegExp(`"tripId":${trip.id}`));
+  ctrl.abort();
 });

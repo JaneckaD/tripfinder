@@ -53,6 +53,7 @@ export const POPULAR_ORIGINS = [
   { id: 'BER', name: 'Berlín', detail: 'Německo', airport: 'BER', kind: 'airport' },
 ];
 
+const AC_CACHE = new Map(); // výsledky našeptávače v paměti (rychlé při psaní a mazání)
 export function autocomplete(input, { onSelect, suggestions = () => [], minChars = 2 } = {}) {
   const wrap = input.closest('.ac-wrap') || input.parentElement;
   wrap.classList.add('ac-wrap');
@@ -86,19 +87,26 @@ export function autocomplete(input, { onSelect, suggestions = () => [], minChars
     list.hidden = true;
     onSelect?.(r);
   };
+  let ctrl = null;
   const search = async () => {
     const q = input.value.trim();
     if (q.length < minChars) { render(suggestions(), ''); return; }
+    const key = q.toLowerCase();
+    if (AC_CACHE.has(key)) { const r = AC_CACHE.get(key); render(r, r.length ? '' : 'Nic jsme nenašli. Zkus město, ulici nebo památku.'); return; }
     const my = ++seq;
-    list.hidden = false;
-    list.innerHTML = '<div class="ac-note">Hledám po celém světě…</div>';
+    ctrl?.abort(); ctrl = new AbortController();
+    // Během hledání nechat předchozí výsledky (bez blikání), jen s jemným „hledám“
+    if (!items.length) { list.hidden = false; list.innerHTML = '<div class="ac-note">Hledám…</div>'; } else list.classList.add('loading');
     try {
-      const res = await fetch(`/api/places?${new URLSearchParams({ q })}`).then((r) => r.json());
+      const res = await fetch(`/api/places?${new URLSearchParams({ q })}`, { signal: ctrl.signal }).then((r) => r.json());
+      const results = res.results || [];
+      if (results.length) { AC_CACHE.set(key, results); if (AC_CACHE.size > 300) AC_CACHE.delete(AC_CACHE.keys().next().value); }
       if (my !== seq) return;
-      render(res.results || [], res.results?.length ? '' : 'Nic jsme nenašli. Zkus město, ulici nebo památku.');
-    } catch { if (my === seq) render([], 'Našeptávač je teď nedostupný.'); }
+      list.classList.remove('loading');
+      render(results, results.length ? '' : 'Nic jsme nenašli. Zkus město, ulici nebo památku.');
+    } catch (err) { if (my === seq && err.name !== 'AbortError') { list.classList.remove('loading'); render([], navigator.onLine === false ? 'Jsi offline, hledání míst teď nejde.' : 'Našeptávač je teď nedostupný.'); } }
   };
-  input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(search, 220); });
+  input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(search, AC_CACHE.has(input.value.trim().toLowerCase()) ? 0 : 140); });
   input.addEventListener('focus', () => { if (input.value.trim().length < minChars) render(suggestions()); else if (input.dataset.dirty) search(); });
   input.addEventListener('input', () => { input.dataset.dirty = '1'; });
   input.addEventListener('keydown', (e) => {
@@ -449,9 +457,14 @@ export function stampSvg({ cc, country, date }) {
   }[shape];
   const circle = shape === 'circle';
   const cy = circle ? 92 : shape === 'oval' ? 64 : 70;
+  // Název země se vždy vejde do razítka: písmo se zmenší podle délky, dlouhé názvy se zkrátí.
+  const label = name.length > 24 ? `${name.slice(0, 23).trim()}…` : name;
+  const room = circle ? 160 : shape === 'hexagon' || shape === 'octagon' ? 112 : shape === 'oval' ? 118 : 128;
+  const fs = Math.max(7.5, Math.min(13, room / (label.length * 0.82)));
+  const ls = fs >= 11 ? 1.6 : fs >= 9 ? 0.8 : 0.3;
   const title = circle
-    ? `<path id="arc-${id}" d="M 30 85 A 55 55 0 0 1 140 85" fill="none" stroke="none"/><text font-size="13" font-weight="800" letter-spacing="2" fill="${ink}" stroke="none"><textPath href="#arc-${id}" startOffset="50%" text-anchor="middle">${esc(name.slice(0, 18))}</textPath></text>`
-    : `<text x="85" y="${shape === 'ticket' ? 34 : shape === 'oval' ? 40 : 32}" text-anchor="middle" font-size="${name.length > 12 ? 10.5 : 13}" font-weight="800" letter-spacing="1.6" fill="${ink}" stroke="none">${esc(name.slice(0, 20))}</text>`;
+    ? `<path id="arc-${id}" d="M 30 85 A 55 55 0 0 1 140 85" fill="none" stroke="none"/><text font-size="${fs.toFixed(1)}" font-weight="800" letter-spacing="${ls}" fill="${ink}" stroke="none"><textPath href="#arc-${id}" startOffset="50%" text-anchor="middle">${esc(label)}</textPath></text>`
+    : `<text x="85" y="${shape === 'ticket' ? 34 : shape === 'oval' ? 40 : 32}" text-anchor="middle" font-size="${fs.toFixed(1)}" font-weight="800" letter-spacing="${ls}" fill="${ink}" stroke="none">${esc(label)}</text>`;
   const bottom = circle ? 136 : shape === 'oval' ? 99 : 112;
   return `<svg class="stamp-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="Razítko ${esc(country)}">
     <defs><filter id="${id}" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 0 0 0 ${parseInt(ink.slice(1, 3), 16) / 255} 0 0 0 0 ${parseInt(ink.slice(3, 5), 16) / 255} 0 0 0 0 ${parseInt(ink.slice(5, 7), 16) / 255} -0.45 -0.6 -0.2 1.35 0"/></filter></defs>
@@ -460,4 +473,125 @@ export function stampSvg({ cc, country, date }) {
     <text x="85" y="${cy + 14}" text-anchor="middle" font-size="${circle ? 46 : 40}" filter="url(#${id})">${motif}</text>
     <text x="85" y="${bottom}" text-anchor="middle" font-size="11" font-weight="700" letter-spacing="1.5" fill="${ink}" stroke="none">${esc(cc)}${when ? ` · ${esc(when)}` : ''}</text>
   </svg>`;
+}
+
+// ---------- Vlastní výběr data (místo systémového kalendáře) ----------
+// Každé <input type="date"> / "datetime-local" se nahradí tlačítkem s grafickým kalendářem.
+// Pravidla: nejde vybrat den v minulosti (kromě data-past, např. datum narození) a konec
+// (data-after="id začátku") nejde dát před začátek; když se začátek posune za konec, konec se posune s ním.
+const DOW_CS = ['Po', 'Út', 'St', 'Čt', 'Pá', 'So', 'Ne'];
+const WD_CS = ['ne', 'po', 'út', 'st', 'čt', 'pá', 'so'];
+const dpLabel = (d) => { const x = parse(d); return `${WD_CS[x.getDay()]} ${x.getDate()}. ${x.getMonth() + 1}. ${x.getFullYear()}`; };
+const addDaysIso = (d, n) => { const x = parse(d); x.setDate(x.getDate() + n); return iso(x); };
+
+function dateBounds(hidden) {
+  const today = iso(new Date());
+  let min = hidden.dataset.min || (hidden.dataset.past != null ? '1900-01-01' : today);
+  const startEl = hidden.dataset.after && document.getElementById(hidden.dataset.after);
+  const start = startEl?.value?.slice(0, 10);
+  if (start && start > min) min = start;
+  const max = hidden.dataset.max || (hidden.dataset.past != null ? today : '2100-12-31');
+  return { min, max, start, today };
+}
+
+function openDatePicker(btn, hidden, onPick) {
+  const cur = hidden.value.slice(0, 10);
+  const { min, max, start, today } = dateBounds(hidden);
+  const base = cur || (start && start > today ? start : '') || (min > today ? min : today);
+  let view = new Date(parse(base).getFullYear(), parse(base).getMonth(), 1);
+  const el = popover(btn, '', { className: 'dp-pop' });
+  const years = []; for (let y = Number(max.slice(0, 4)); y >= Math.max(Number(min.slice(0, 4)), 1900); y--) years.push(y);
+  const render = () => {
+    const first = view; const offset = (first.getDay() + 6) % 7;
+    const days = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+    const prevOk = iso(new Date(first.getFullYear(), first.getMonth(), 0)) >= min;
+    const nextOk = iso(new Date(first.getFullYear(), first.getMonth() + 1, 1)) <= max;
+    let cells = '<span></span>'.repeat(offset);
+    for (let d = 1; d <= days; d++) {
+      const date = iso(new Date(first.getFullYear(), first.getMonth(), d));
+      const off = date < min || date > max;
+      const cls = [off && 'past', date === today && 'today', date === cur && 'start end',
+        start && date === start && date !== cur && 'anchor', start && cur && date > start && date < cur && 'in'].filter(Boolean).join(' ');
+      cells += `<button type="button" class="${cls}" data-d="${date}" ${off ? 'disabled' : ''} aria-label="${dpLabel(date)}">${d}</button>`;
+    }
+    el.innerHTML = `<div class="dp-head">
+        <button type="button" class="cal-nav" data-nav="-1" ${prevOk ? '' : 'disabled'} aria-label="Předchozí měsíc">${ms('chevron_left')}</button>
+        <div class="dp-title"><select data-m aria-label="Měsíc">${MONTHS_CS.map((m, i) => `<option value="${i}" ${i === first.getMonth() ? 'selected' : ''}>${m}</option>`).join('')}</select>
+          <select data-y aria-label="Rok">${years.map((y) => `<option ${y === first.getFullYear() ? 'selected' : ''}>${y}</option>`).join('')}</select></div>
+        <button type="button" class="cal-nav" data-nav="1" ${nextOk ? '' : 'disabled'} aria-label="Další měsíc">${ms('chevron_right')}</button>
+      </div>
+      <div class="cal-dow">${DOW_CS.map((x) => `<span>${x}</span>`).join('')}</div>
+      <div class="cal-days dp-days">${cells}</div>
+      <div class="dp-foot">${hidden.dataset.optional != null && cur ? '<button type="button" class="btn ghost sm" data-clear>Vymazat</button>' : '<span></span>'}
+        ${today >= min && today <= max ? `<button type="button" class="btn soft sm" data-pick-today>Dnes</button>` : start ? '<button type="button" class="btn soft sm" data-pick-start>Stejný den jako začátek</button>' : ''}</div>`;
+  };
+  render();
+  el.addEventListener('change', (e) => {
+    if (e.target.matches('[data-m], [data-y]')) { view = new Date(Number(el.querySelector('[data-y]').value), Number(el.querySelector('[data-m]').value), 1); render(); }
+  });
+  el.addEventListener('click', (e) => {
+    const nav = e.target.closest('[data-nav]');
+    if (nav) { view = new Date(view.getFullYear(), view.getMonth() + Number(nav.dataset.nav), 1); render(); return; }
+    if (e.target.closest('[data-clear]')) { onPick(''); closePopover(); return; }
+    if (e.target.closest('[data-pick-today]')) { onPick(today); closePopover(); return; }
+    if (e.target.closest('[data-pick-start]')) { onPick(start); closePopover(); return; }
+    const day = e.target.closest('[data-d]');
+    if (day && !day.disabled) { onPick(day.dataset.d); closePopover(); }
+  });
+}
+
+export function enhanceDate(input) {
+  if (input.dataset.dp) return;
+  const withTime = input.type === 'datetime-local';
+  const wrap = document.createElement('div');
+  wrap.className = `dp${withTime ? ' dp-dt' : ''}`;
+  input.replaceWith(wrap);
+  const hidden = input; // stejné id, name a hodnota – formuláře a skripty fungují dál
+  hidden.type = 'hidden'; hidden.dataset.dp = '1';
+  if (!hidden.required && hidden.dataset.past == null) hidden.dataset.optional = '';
+  if (hidden.min) hidden.dataset.min = hidden.min;
+  if (hidden.max) hidden.dataset.max = hidden.max;
+  const btn = document.createElement('button');
+  btn.type = 'button'; btn.className = 'dp-btn';
+  if (hidden.id) { btn.id = `${hidden.id}-btn`; document.querySelector(`label[for="${hidden.id}"]`)?.setAttribute('for', btn.id); }
+  wrap.append(hidden, btn);
+  let time;
+  if (withTime) {
+    time = document.createElement('input');
+    time.type = 'time'; time.className = 'dp-time'; time.setAttribute('aria-label', 'Čas');
+    time.value = hidden.value.slice(11, 16);
+    wrap.append(time);
+  }
+  const draw = () => {
+    const d = hidden.value.slice(0, 10);
+    btn.innerHTML = `${ms('calendar_today', 'sm')}<span>${d ? dpLabel(d) : 'Vybrat datum'}</span>`;
+    btn.classList.toggle('empty', !d);
+  };
+  const set = (d, { silent = false } = {}) => {
+    const old = hidden.value.slice(0, 10);
+    hidden.value = d ? (withTime ? `${d}T${time.value || '08:00'}` : d) : '';
+    if (withTime && d && !time.value) time.value = '08:00';
+    draw();
+    if (!silent) { hidden.dispatchEvent(new Event('input', { bubbles: true })); hidden.dispatchEvent(new Event('change', { bubbles: true })); }
+    // Posunout navázaný konec, když by byl před začátkem (zachová délku pobytu)
+    if (hidden.id && d) {
+      document.querySelectorAll(`input[data-after="${hidden.id}"]`).forEach((end) => {
+        const e0 = end.value.slice(0, 10);
+        if (e0 && e0 < d) end._dpSet?.(old && e0 >= old ? addDaysIso(d, Math.round((parse(e0) - parse(old)) / 86400000)) : d);
+        else end._dpDraw?.();
+      });
+    }
+  };
+  hidden._dpSet = (d) => set(d);
+  hidden._dpDraw = draw;
+  time?.addEventListener('change', () => { const d = hidden.value.slice(0, 10); if (d) set(d); });
+  btn.addEventListener('click', () => openDatePicker(btn, hidden, (d) => set(d)));
+  draw();
+}
+
+// Automaticky pro všechna data na stránce i v nově otevřených oknech
+export function autoDatePickers(root = document.body) {
+  const run = (el) => el.querySelectorAll?.('input[type="date"], input[type="datetime-local"]').forEach(enhanceDate);
+  run(root);
+  new MutationObserver((list) => { for (const m of list) for (const n of m.addedNodes) if (n.nodeType === 1) run(n); }).observe(root, { childList: true, subtree: true });
 }
