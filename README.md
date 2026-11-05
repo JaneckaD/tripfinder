@@ -47,7 +47,7 @@ Proměnné prostředí:
 - **Libovolné místo na světě** – našeptávač Odkud/Kam hledá města, adresy i památky přes [Photon](https://photon.komoot.io) (OpenStreetMap, bez klíče) a ke každému místu dohledá nejbližší letiště (databáze OurAirports v `server/data/airports.json`).
 - **Spoje s přestupy** – let s přestupem, doprava na letiště a z letiště, přímý vlak/autobus i kombinace vlak + autobus. Každý spoj i ubytování jde rozkliknout do detailu (jízdní řád po úsecích, mapa, fotky).
 - **Okružní cesta** – více měst a zemí za sebou, noci v každé zastávce, doprava mezi nimi a ubytování, mapa trasy a uložení jako výlet.
-- **Mapa** – Leaflet + dlaždice OpenStreetMap (bez API klíče, záloha Esri; v Prozkoumat i turistická OpenTopoMap a satelit); lety oranžovo-červeně obloukem, vlaky modře, autobusy zeleně.
+- **Mapa** – Leaflet s barevným vektorovým podkladem OpenFreeMap (MapLibre GL, bez API klíče, bez obchodů a čísel domů); bez WebGL nebo při výpadku dlaždice OpenStreetMap a záloha Esri. V Prozkoumat i turistická OpenTopoMap a satelit. Piny jsou barevné podle typu (ubytování, památky, jídlo, zážitky, doprava), ubytování s fotkou.
 - **Akce na půl roku** – nejlevnější letenky (Travelpayouts `prices/latest`, bez klíče ukázkové ceny) a zvýhodněné ubytování po měsících.
 - **Prozkoumat** – mapa s piny s fotkami zajímavých míst v okolí (příroda, památky, kultura) z Wikipedie, detail místa a navigace k němu.
 - **Pěšky a autem** – trasy po cestách a silnicích z OpenStreetMap ([OSRM na routing.openstreetmap.de](https://routing.openstreetmap.de)) s pokyny po krocích a odkazem do Google Maps.
@@ -59,6 +59,11 @@ Proměnné prostředí:
 - **Cestovatelský pas** – dokončený výlet přidá do profilu razítko každé navštívené země (Francie má croissant, Itálie pizzu…).
 - **Účty** – registrace a přihlášení (hesla hashovaná scryptem, session v HttpOnly cookie).
 - **Výlety** – libovolný počet, ukládání destinací, dopravy, ubytování a poznámek s cenou, součet rozpočtu a cena na osobu.
+- **Návrhy party** – každý má u návrhu jeden hlas pro, nebo proti; stav (Nový návrh, Hlasuje se, Schváleno, Zamítnuto) se počítá z hlasů. Místo jde dohledat našeptávačem a uloží se i na mapu.
+- **Doprava ve výletu** – vyhledání spoje pro konkrétní den, nebo vlastní spoj: dopravce, odkud a kam, odjezd a příjezd, místa, kód rezervace a nahraný QR kód jízdenky.
+- **Ubytování ve výletu** – hledání na Airbnb s fotkami, odkaz na Booking.com s vyplněným termínem (Booking nemá veřejné API) a vlastní ubytování s nahranými fotkami a volbou náhledového obrázku.
+- **Platby** – u každé položky cena, termín splatnosti a kdo se na ní podílí; každý vidí, kolik a za co ještě doplácí, a svůj podíl si odškrtne. Organizátor odškrtává i za ostatní.
+- **Fotky** – profilová fotka, náhledový obrázek výletu a fotky ubytování a jízdenek se zmenší v prohlížeči a uloží do databáze (tabulka `trip_files`, sloupec `users.avatar`).
 - **Spolucestující** – pozvání e-mailem s rolí „upravuje“ nebo „jen čte“. Kdo ještě nemá účet, uvidí výlet hned po registraci.
 - **Sdílení** – veřejný odkaz jen pro čtení, jde kdykoli zrušit.
 - **PWA** – instalovatelná na mobil i desktop, offline režim pro aplikaci a naposledy načtená data.

@@ -42,7 +42,7 @@ export function sessionCookie(token, expires, secure) {
 
 // Middleware: načte přihlášeného uživatele do req.user (nebo null).
 export function loadUser(db) {
-  const sql = `SELECT u.id, u.email, u.name FROM sessions s JOIN users u ON u.id = s.user_id
+  const sql = `SELECT u.id, u.email, u.name, u.avatar_v FROM sessions s JOIN users u ON u.id = s.user_id
     WHERE s.token = ? AND s.expires_at > ?`;
   return async (req, _res, next) => {
     try {

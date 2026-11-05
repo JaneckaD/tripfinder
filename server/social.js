@@ -61,7 +61,7 @@ export const profileOf = (u) => ({
 export function socialRouter(db) {
   const r = express.Router();
   const bad = (res, msg, code = 400) => res.status(code).json({ error: msg });
-  const publicUser = (u) => ({ id: u.id, name: u.name, email: u.email });
+  const publicUser = (u) => ({ id: u.id, name: u.name, email: u.email, avatar_v: u.avatar_v || 0 });
 
   // ---------- Profil ----------
   r.get('/me/profile', requireUser, async (req, res) => {
@@ -126,13 +126,13 @@ export function socialRouter(db) {
   r.get('/friends', requireUser, async (req, res) => {
     const me = req.user.id;
     const rows = await db.all(`
-      SELECT f.id AS fid, f.status, f.requester_id, f.created_at, u.id, u.name, u.email,
+      SELECT f.id AS fid, f.status, f.requester_id, f.created_at, u.id, u.name, u.email, u.avatar_v,
         (SELECT COUNT(*) FROM messages m WHERE m.sender_id = u.id AND m.recipient_id = ? AND m.read_at IS NULL) AS unread,
         (SELECT body FROM messages m WHERE (m.sender_id = u.id AND m.recipient_id = ?) OR (m.sender_id = ? AND m.recipient_id = u.id) ORDER BY m.id DESC LIMIT 1) AS last_body,
         (SELECT created_at FROM messages m WHERE (m.sender_id = u.id AND m.recipient_id = ?) OR (m.sender_id = ? AND m.recipient_id = u.id) ORDER BY m.id DESC LIMIT 1) AS last_at
       FROM friendships f JOIN users u ON u.id = CASE WHEN f.requester_id = ? THEN f.addressee_id ELSE f.requester_id END
       WHERE f.requester_id = ? OR f.addressee_id = ?`, me, me, me, me, me, me, me, me);
-    const person = (x) => ({ id: x.id, name: x.name, email: x.email, since: x.created_at });
+    const person = (x) => ({ id: x.id, name: x.name, email: x.email, avatar_v: x.avatar_v || 0, since: x.created_at });
     res.json({
       friends: rows.filter((x) => x.status === 'accepted')
         .map((x) => ({ ...person(x), unread: Number(x.unread), lastMessage: x.last_body ? { body: x.last_body.slice(0, 120), at: x.last_at } : null }))

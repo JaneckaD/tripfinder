@@ -24,25 +24,31 @@ export const PLANNER_SCHEMA = `
     PRIMARY KEY (trip_id, user_id)
   );
 `;
-export const PLANNER_MIGRATIONS = ['ALTER TABLE trips ADD COLUMN invite_token TEXT'];
+export const PLANNER_MIGRATIONS = ['ALTER TABLE trips ADD COLUMN invite_token TEXT', 'ALTER TABLE item_votes ADD COLUMN value INTEGER NOT NULL DEFAULT 1'];
 
-// Pole položky, která jde upravit v plánovači (den, čas, popis, cena, stav…).
-const EDITABLE = ['day', 'time', 'title', 'note', 'place', 'category', 'status', 'cost', 'url', 'lat', 'lng', 'image'];
+// Pole položky, která jde upravit v plánovači (den, čas, popis, cena, stav, platby, detaily spoje a ubytování…).
+const TEXT = { title: 160, note: 1000, place: 160, status: 20, seats: 120, booking: 80, carrier: 120, fromPlace: 160, toPlace: 160, address: 200 };
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const DT_RE = /^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d$/;
+const URL_OK = (v) => /^https?:\/\//.test(v || '') || /^\/api\/trips\/\d+\/files\/\d+$/.test(v || '');
+const num = (v) => (v === '' || v == null || !Number.isFinite(Number(v)) ? null : Number(v));
+const point = (p) => (p && Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng)) ? { lat: Number(p.lat), lng: Number(p.lng) } : null);
 
 export function cleanActivity(src = {}) {
   const out = {};
-  for (const k of EDITABLE) {
-    if (!(k in src)) continue;
-    let v = src[k];
-    if (k === 'day') v = DAY_RE.test(v || '') ? v : null;
-    else if (k === 'time') v = TIME_RE.test(v || '') ? v : null;
-    else if (k === 'cost' || k === 'lat' || k === 'lng') v = v === '' || v == null || !Number.isFinite(Number(v)) ? null : Number(v);
-    else if (k === 'category') v = ['transport', 'lodging', 'sight', 'food', 'activity'].includes(v) ? v : 'activity';
-    else if (k === 'url' || k === 'image') v = /^https?:\/\//.test(v || '') ? String(v).slice(0, 600) : null;
-    else v = String(v ?? '').slice(0, k === 'note' ? 1000 : 160);
-    out[k] = v;
+  for (const [k, v] of Object.entries(src)) {
+    if (k in TEXT) out[k] = String(v ?? '').slice(0, TEXT[k]);
+    else if (k === 'day' || k === 'due' || k === 'checkout') out[k] = DAY_RE.test(v || '') ? v : null;
+    else if (k === 'time') out[k] = TIME_RE.test(v || '') ? v : null;
+    else if (k === 'depart' || k === 'arrive') out[k] = DT_RE.test(v || '') ? v : null;
+    else if (k === 'cost' || k === 'lat' || k === 'lng') out[k] = num(v);
+    else if (k === 'category') out[k] = ['transport', 'lodging', 'sight', 'food', 'activity'].includes(v) ? v : 'activity';
+    else if (k === 'mode') out[k] = ['flight', 'train', 'bus', 'car', 'ferry', 'walk'].includes(v) ? v : 'train';
+    else if (k === 'url' || k === 'image' || k === 'cover' || k === 'qr') out[k] = URL_OK(v) ? String(v).slice(0, 600) : null;
+    else if (k === 'images') out[k] = (Array.isArray(v) ? v : []).filter(URL_OK).slice(0, 24).map((x) => String(x).slice(0, 600));
+    else if (k === 'split') out[k] = (Array.isArray(v) ? v : []).map(Number).filter((x) => Number.isInteger(x) && x > 0).slice(0, 40);
+    else if (k === 'fromPt' || k === 'toPt') out[k] = point(v);
   }
   return out;
 }
@@ -56,7 +62,7 @@ export function plannerRoutes(api, { db, withTrip, tripDetail, tripRole }) {
     const item = await db.get('SELECT * FROM trip_items WHERE id = ? AND trip_id = ?', Number(req.params.itemId) || 0, req.trip.id);
     if (!item) return bad(res, 'Položka nenalezena.', 404);
     const data = { ...JSON.parse(item.data), ...cleanActivity(req.body || {}) };
-    const price = item.kind === 'note' ? (Number.isFinite(data.cost) ? data.cost : null) : item.price;
+    const price = item.kind === 'note' || 'cost' in (req.body || {}) ? (Number.isFinite(data.cost) ? data.cost : null) : item.price;
     await db.batch([
       ['UPDATE trip_items SET data = ?, price = ? WHERE id = ?', JSON.stringify(data).slice(0, 20000), price, item.id],
       [`UPDATE trips SET updated_at = datetime('now') WHERE id = ?`, req.trip.id],
@@ -64,21 +70,38 @@ export function plannerRoutes(api, { db, withTrip, tripDetail, tripRole }) {
     res.json(await detail(req));
   });
 
-  // Hlasování o nápadu (každý člen jeden hlas, druhé kliknutí hlas vrátí)
+  // Hlasování o návrhu: každý člen má jeden hlas – pro (1), nebo proti (-1); 0 hlas zruší.
+  // Bez hodnoty se hlas „pro“ přepíná (kvůli kartám v chatu).
   api.post('/trips/:id/items/:itemId/vote', requireUser, withTrip('viewer'), async (req, res) => {
     const itemId = Number(req.params.itemId) || 0;
     if (!(await db.get('SELECT 1 FROM trip_items WHERE id = ? AND trip_id = ?', itemId, req.trip.id))) return bad(res, 'Položka nenalezena.', 404);
-    const had = await db.get('SELECT 1 FROM item_votes WHERE item_id = ? AND user_id = ?', itemId, req.user.id);
-    if (had) await db.run('DELETE FROM item_votes WHERE item_id = ? AND user_id = ?', itemId, req.user.id);
-    else await db.run('INSERT INTO item_votes (item_id, user_id) VALUES (?, ?)', itemId, req.user.id);
+    const had = await db.get('SELECT value FROM item_votes WHERE item_id = ? AND user_id = ?', itemId, req.user.id);
+    let value = Number(req.body?.value);
+    if (!('value' in (req.body || {}))) value = had?.value === 1 ? 0 : 1;
+    if (![1, -1, 0].includes(value)) return bad(res, 'Hlas může být jen pro, nebo proti.');
+    await db.run('DELETE FROM item_votes WHERE item_id = ? AND user_id = ?', itemId, req.user.id);
+    if (value) await db.run('INSERT INTO item_votes (item_id, user_id, value) VALUES (?, ?, ?)', itemId, req.user.id, value);
+    res.json(await detail(req));
+  });
+
+  // Platby: kdo už svůj podíl zaplatil. Svůj podíl si odškrtne každý, organizátor i za ostatní.
+  api.post('/trips/:id/items/:itemId/paid', requireUser, withTrip('viewer'), async (req, res) => {
+    const item = await db.get('SELECT * FROM trip_items WHERE id = ? AND trip_id = ?', Number(req.params.itemId) || 0, req.trip.id);
+    if (!item) return bad(res, 'Položka nenalezena.', 404);
+    const userId = Number(req.body?.userId) || req.user.id;
+    if (userId !== req.user.id && req.role !== 'owner') return bad(res, 'Za ostatní platby odškrtává jen organizátor.', 403);
+    const data = JSON.parse(item.data);
+    data.paid = { ...(data.paid || {}) };
+    if (req.body?.paid === false) delete data.paid[userId]; else data.paid[userId] = new Date().toISOString().slice(0, 10);
+    await db.run('UPDATE trip_items SET data = ? WHERE id = ?', JSON.stringify(data), item.id);
     res.json(await detail(req));
   });
 
   // ---------- Skupinový chat výletu ----------
-  const messageOut = (m, me) => ({ id: m.id, mine: m.sender_id === me, sender: { id: m.sender_id, name: m.name }, body: m.body, data: m.data ? JSON.parse(m.data) : null, at: m.created_at });
+  const messageOut = (m, me) => ({ id: m.id, mine: m.sender_id === me, sender: { id: m.sender_id, name: m.name, avatar_v: m.avatar_v || 0 }, body: m.body, data: m.data ? JSON.parse(m.data) : null, at: m.created_at });
   api.get('/trips/:id/chat', requireUser, withTrip('viewer'), async (req, res) => {
     const after = Number(req.query.after) || 0;
-    const rows = await db.all(`SELECT m.*, u.name FROM trip_messages m JOIN users u ON u.id = m.sender_id
+    const rows = await db.all(`SELECT m.*, u.name, u.avatar_v FROM trip_messages m JOIN users u ON u.id = m.sender_id
       WHERE m.trip_id = ? AND m.id > ? ORDER BY m.id DESC LIMIT 200`, req.trip.id, after);
     const last = rows[0]?.id;
     if (last) {
@@ -105,7 +128,7 @@ export function plannerRoutes(api, { db, withTrip, tripDetail, tripRole }) {
     const { lastInsertRowid: id } = await db.run('INSERT INTO trip_messages (trip_id, sender_id, body, data) VALUES (?, ?, ?, ?)', req.trip.id, req.user.id, body, data ? JSON.stringify(data) : null);
     await db.run(`INSERT INTO trip_reads (trip_id, user_id, last_id) VALUES (?, ?, ?)
       ON CONFLICT(trip_id, user_id) DO UPDATE SET last_id = excluded.last_id`, req.trip.id, req.user.id, id);
-    const m = await db.get('SELECT m.*, u.name FROM trip_messages m JOIN users u ON u.id = m.sender_id WHERE m.id = ?', id);
+    const m = await db.get('SELECT m.*, u.name, u.avatar_v FROM trip_messages m JOIN users u ON u.id = m.sender_id WHERE m.id = ?', id);
     res.status(201).json({ message: messageOut(m, req.user.id) });
   });
 

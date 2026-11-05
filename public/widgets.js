@@ -220,27 +220,39 @@ export function guestsPicker(anchor, { adults = 2, children = 0, onChange }) {
 
 // ---------- Mapa ----------
 let leafletPromise = null;
+// Leaflet + (když to prohlížeč zvládne) vektorová mapa MapLibre: hladké přibližování a barevný styl jako Apple Mapy.
+const webglOK = () => { try { const c = document.createElement('canvas'); return Boolean(c.getContext('webgl2') || c.getContext('webgl')); } catch { return false; } };
+const addScript = (src) => new Promise((resolve, reject) => { const s = document.createElement('script'); s.src = src; s.onload = resolve; s.onerror = reject; document.head.appendChild(s); });
+const addCss = (href) => { const l = document.createElement('link'); l.rel = 'stylesheet'; l.href = href; document.head.appendChild(l); };
+function loadGL() {
+  if (!webglOK()) return Promise.resolve(false);
+  return Promise.race([
+    (async () => {
+      addCss('/vendor/maplibre/maplibre-gl.css');
+      await addScript('/vendor/maplibre/maplibre-gl.js');
+      await addScript('/vendor/maplibre-leaflet/leaflet-maplibre-gl.js');
+      return Boolean(window.maplibregl && window.L?.maplibreGL);
+    })().catch(() => false),
+    new Promise((r) => setTimeout(() => r(false), 8000)),
+  ]);
+}
 export function loadLeaflet() {
-  if (window.L) return Promise.resolve(window.L);
-  leafletPromise ||= new Promise((resolve, reject) => {
-    const css = document.createElement('link');
-    css.rel = 'stylesheet'; css.href = '/vendor/leaflet/leaflet.css';
-    document.head.appendChild(css);
-    const s = document.createElement('script');
-    s.src = '/vendor/leaflet/leaflet.js';
-    s.onload = () => resolve(window.L);
-    s.onerror = reject;
-    document.head.appendChild(s);
-  });
+  if (window.L && leafletPromise) return leafletPromise;
+  leafletPromise ||= (async () => {
+    if (!window.L) { addCss('/vendor/leaflet/leaflet.css'); await addScript('/vendor/leaflet/leaflet.js'); }
+    window.L._tfGL = await loadGL();
+    return window.L;
+  })();
   return leafletPromise;
 }
 
 export const MODE_STYLE = {
-  flight: { color: '#111111', dash: '2 9', weight: 3, icon: 'flight', label: 'Let' },
-  train: { color: '#111111', dash: null, weight: 4, icon: 'train', label: 'Vlak' },
-  bus: { color: '#3a3a3c', dash: '10 7', weight: 4, icon: 'directions_bus', label: 'Autobus' },
-  car: { color: '#3a3a3c', dash: null, weight: 4, icon: 'directions_car', label: 'Autem' },
-  walk: { color: '#6e6e73', dash: '1 7', weight: 4, icon: 'directions_walk', label: 'Pěšky' },
+  flight: { color: '#0a84ff', dash: '2 9', weight: 3, icon: 'flight', label: 'Let' },
+  train: { color: '#ff9f0a', dash: null, weight: 4, icon: 'train', label: 'Vlak' },
+  bus: { color: '#30d158', dash: '10 7', weight: 4, icon: 'directions_bus', label: 'Autobus' },
+  car: { color: '#5e5ce6', dash: null, weight: 4, icon: 'directions_car', label: 'Autem' },
+  ferry: { color: '#64d2ff', dash: '8 8', weight: 4, icon: 'directions_boat', label: 'Loď' },
+  walk: { color: '#8e8e93', dash: '1 7', weight: 4, icon: 'directions_walk', label: 'Pěšky' },
 };
 
 // Zakřivený oblouk (pro lety) – kvadratická Bézierova křivka.
@@ -261,21 +273,71 @@ function arc(a, b) {
 // proto OpenStreetMap; když dlaždice opakovaně selžou, přepne se na Esri. withLayers přidá přepínač
 // Mapa / Turistická / Satelit.
 const OSM_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
+// Barevný hladký podklad (OpenFreeMap, bez klíče). Bez WebGL nebo při chybě se použijí rastrové dlaždice OSM.
+const VECTOR_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
 export function baseTiles(L, map, { withLayers = false, extraAttr = '' } = {}) {
-  const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: OSM_ATTR + extraAttr, crossOrigin: true });
-  const esri = () => L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: `Tiles &copy; Esri${extraAttr}` });
-  let fails = 0; let swapped = false;
-  osm.on('tileerror', () => {
-    if (swapped || ++fails < 4) return;
-    swapped = true; map.removeLayer(osm); esri().addTo(map);
-  });
-  osm.addTo(map);
+  const raster = () => {
+    const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: OSM_ATTR + extraAttr, crossOrigin: true });
+    let fails = 0; let swapped = false;
+    osm.on('tileerror', () => {
+      if (swapped || ++fails < 4) return;
+      swapped = true; map.removeLayer(osm);
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: `Tiles &copy; Esri${extraAttr}` }).addTo(map);
+    });
+    return osm;
+  };
+  let base;
+  if (L._tfGL && L.maplibreGL) {
+    base = L.maplibreGL({ style: VECTOR_STYLE, attribution: `<a href="https://openfreemap.org" target="_blank">OpenFreeMap</a> ${OSM_ATTR}${extraAttr}` });
+    base.addTo(map);
+    let ready = false;
+    const fallback = () => {
+      if (ready || !map.hasLayer(base)) return;
+      map.removeLayer(base); base = raster().addTo(map);
+    };
+    // Vrstva se vytvoří až po nastavení pohledu mapy
+    map.whenReady(() => {
+      const gl = base.getMaplibreMap?.();
+      if (!gl) { fallback(); return; }
+      // Méně informací: bez obchodů, restaurací a čísel domů – jen ulice, místa a příroda.
+      gl.on('load', () => {
+        ready = true;
+        for (const l of gl.getStyle().layers) if (/^poi|housenumber|aeroway|building-3d/.test(l.id)) gl.setLayoutProperty(l.id, 'visibility', 'none');
+      });
+      gl.on('error', () => { if (!ready) fallback(); });
+    });
+    setTimeout(fallback, 8000);
+  } else base = raster().addTo(map);
   if (withLayers) {
-    const topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { subdomains: 'abc', maxZoom: 17, attribution: `${OSM_ATTR}, &copy; <a href="https://opentopomap.org">OpenTopoMap</a>${extraAttr}` });
     const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: `&copy; Esri, Maxar${extraAttr}` });
-    L.control.layers({ Mapa: osm, Turistická: topo, Satelit: sat }, null, { position: 'bottomleft' }).addTo(map);
+    const topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { subdomains: 'abc', maxZoom: 17, attribution: `${OSM_ATTR}, &copy; <a href="https://opentopomap.org">OpenTopoMap</a>${extraAttr}` });
+    L.control.layers({ Mapa: base, Turistická: topo, Satelit: sat }, null, { position: 'bottomleft' }).addTo(map);
   }
-  return osm;
+  return base;
+}
+
+// Obrázky: zmenšení v prohlížeči před nahráním (rychlé i na mobilních datech).
+export function pickImages({ multiple = false } = {}) {
+  return new Promise((resolve) => {
+    const input = Object.assign(document.createElement('input'), { type: 'file', accept: 'image/*', multiple });
+    input.onchange = () => resolve([...input.files]);
+    input.click();
+  });
+}
+export async function imageToDataUrl(file, { max = 1280, square = false, quality = 0.84 } = {}) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('Tenhle soubor neumím otevřít jako obrázek.')); i.src = url; });
+    let sx = 0; let sy = 0; let sw = img.naturalWidth; let sh = img.naturalHeight;
+    if (square) { const m = Math.min(sw, sh); sx = (sw - m) / 2; sy = (sh - m) / 2; sw = sh = m; }
+    const k = Math.min(1, max / Math.max(sw, sh));
+    const c = document.createElement('canvas');
+    c.width = Math.round(sw * k); c.height = Math.round(sh * k);
+    const g = c.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+    g.drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', quality);
+  } finally { URL.revokeObjectURL(url); }
 }
 
 // Dotyková zařízení: mapu posouvá jen dva prsty (jedním prstem se roluje stránka), přiblížení gestem roztažení.
@@ -316,21 +378,22 @@ export async function drawMap(el, { points = [], segments = [], legend = true } 
     if (!s.from || !s.to) continue;
     const st = MODE_STYLE[s.mode] || MODE_STYLE.car;
     const line = s.path?.length > 1 ? s.path : s.mode === 'flight' ? arc(s.from, s.to) : [s.from, s.to];
-    L.polyline(line, { color: '#fff', weight: st.weight + 4, opacity: 0.85 }).addTo(map);
-    const pl = L.polyline(line, { color: st.color, weight: st.weight, dashArray: st.dash, lineCap: 'round' }).addTo(map);
+    const color = s.color || st.color;
+    L.polyline(line, { color: '#fff', weight: st.weight + 5, opacity: 0.9 }).addTo(map);
+    const pl = L.polyline(line, { color, weight: st.weight + 1, dashArray: st.dash, lineCap: 'round' }).addTo(map);
     if (s.label) pl.bindTooltip(`${esc(s.label)}`, { sticky: true });
     const mid = line[Math.floor(line.length / 2)];
-    L.marker(mid, { icon: L.divIcon({ className: 'map-mode', html: `<span style="--c:${st.color}">${ms(st.icon)}</span>`, iconSize: [26, 26], iconAnchor: [13, 13] }), interactive: false }).addTo(map);
+    L.marker(mid, { icon: L.divIcon({ className: 'map-mode', html: `<span style="--c:${color}">${ms(st.icon)}</span>`, iconSize: [26, 26], iconAnchor: [13, 13] }), interactive: false }).addTo(map);
     bounds.push(...line);
   }
   for (const p of points) {
     if (!Number.isFinite(p.lat)) continue;
-    const html = p.kind === 'stay'
-      ? `<span class="pin-stay" style="--c:${p.color || '#3a3a3c'}">${ms('bed')}</span>`
-      : `<span class="pin" style="--c:${p.color || '#111111'}">${p.num ?? ms(p.kind === 'origin' ? 'home' : 'location_on')}</span>`;
-    const size = p.kind === 'stay' ? 26 : 32;
-    L.marker([p.lat, p.lng], { icon: L.divIcon({ className: 'map-pin', html, iconSize: [size, size], iconAnchor: [size / 2, size / 2] }), zIndexOffset: p.kind === 'stay' ? 0 : 500 })
-      .addTo(map).bindPopup(`<b>${esc(p.label)}</b>${p.sub ? `<br><span>${esc(p.sub)}</span>` : ''}`);
+    const color = p.color || (p.kind === 'stay' ? '#ff375f' : '#0a84ff');
+    const inner = p.image ? `<img src="${esc(p.image)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">` : '';
+    const html = `<span class="apin${p.image ? ' photo' : ''}" style="--c:${color}">${inner}${p.num != null && !p.image ? `<b>${p.num}</b>` : ms(p.icon || (p.kind === 'stay' ? 'bed' : p.kind === 'origin' ? 'home' : 'location_on'))}</span>`;
+    const size = p.image ? 40 : 30;
+    L.marker([p.lat, p.lng], { icon: L.divIcon({ className: 'map-pin', html, iconSize: [size, size], iconAnchor: [size / 2, size / 2] }), zIndexOffset: p.z || 0, riseOnHover: true })
+      .addTo(map).bindPopup(`${p.image ? `<img class="pop-img" src="${esc(p.image)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}<b>${esc(p.label)}</b>${p.sub ? `<br><span>${esc(p.sub)}</span>` : ''}`, { className: 'apple-pop' });
     bounds.push([p.lat, p.lng]);
   }
   if (bounds.length > 1) map.fitBounds(bounds, { padding: [36, 36], maxZoom: 13 });

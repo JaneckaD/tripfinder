@@ -14,6 +14,7 @@ import { createExtras } from './extras.js';
 import { profileOf, socialRouter } from './social.js';
 import { plannerRoutes } from './planner.js';
 import { indexHtml } from './icons.js';
+import { mediaRoutes } from './media.js';
 import compression from 'compression';
 import { countries } from 'countries-list';
 
@@ -37,7 +38,7 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
   const app = express();
   app.disable('x-powered-by');
   app.use(compression());
-  app.use(express.json({ limit: '200kb' }));
+  app.use(express.json({ limit: '2mb' }));
   app.use(loadUser(db));
 
   const api = express.Router();
@@ -249,14 +250,15 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
   const tripDetail = async (trip, role, userId = null) => {
     const [itemRows, members, owner, votes] = await Promise.all([
       db.all('SELECT * FROM trip_items WHERE trip_id = ? ORDER BY created_at, id', trip.id),
-      db.all(`SELECT m.id, m.email, m.role, m.user_id, u.name FROM trip_members m
+      db.all(`SELECT m.id, m.email, m.role, m.user_id, u.name, u.avatar_v FROM trip_members m
         LEFT JOIN users u ON u.id = m.user_id WHERE m.trip_id = ? ORDER BY m.id`, trip.id),
-      db.get('SELECT id, name, email FROM users WHERE id = ?', trip.owner_id),
-      db.all('SELECT v.item_id, v.user_id FROM item_votes v JOIN trip_items i ON i.id = v.item_id WHERE i.trip_id = ?', trip.id),
+      db.get('SELECT id, name, email, avatar_v FROM users WHERE id = ?', trip.owner_id),
+      db.all('SELECT v.item_id, v.user_id, v.value FROM item_votes v JOIN trip_items i ON i.id = v.item_id WHERE i.trip_id = ?', trip.id),
     ]);
     const items = itemRows.map((it) => {
       const mine = votes.filter((v) => v.item_id === it.id);
-      return { ...it, data: JSON.parse(it.data), votes: mine.length, voted: mine.some((v) => v.user_id === userId) };
+      const up = mine.filter((v) => v.value !== -1).length;
+      return { ...it, data: JSON.parse(it.data), votes: up, up, down: mine.length - up, myVote: mine.find((v) => v.user_id === userId)?.value || 0, voted: mine.some((v) => v.user_id === userId && v.value !== -1) };
     });
     const total = items.reduce((sum, it) => sum + (it.price || 0), 0);
     return { trip: { ...trip, share_token: role === 'owner' ? trip.share_token : undefined, invite_token: role === 'owner' ? trip.invite_token : undefined }, role, owner, items, members, total };
@@ -272,7 +274,7 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
       FROM trips t LEFT JOIN trip_members m ON m.trip_id = t.id AND m.user_id = ?
       WHERE t.owner_id = ? OR m.user_id = ?
       ORDER BY t.updated_at DESC`, req.user.id, req.user.id, req.user.id, req.user.id);
-    res.json({ trips: trips.map(({ cover_data, ...t }) => ({ ...t, cover: cover_data ? JSON.parse(cover_data).destinationId || null : null })) });
+    res.json({ trips: trips.map(({ cover_data, cover: coverImage, ...t }) => ({ ...t, cover_image: coverImage || null, cover: cover_data ? JSON.parse(cover_data).destinationId || null : null })) });
   });
 
   api.post('/trips', requireUser, async (req, res) => {
@@ -296,11 +298,12 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
   api.get('/trips/:id', requireUser, withTrip('viewer'), async (req, res) => res.json(await tripDetail(req.trip, req.role, req.user.id)));
 
   api.patch('/trips/:id', requireUser, withTrip('editor'), async (req, res) => {
-    const t = { ...req.trip, ...pickFields(req.body, ['title', 'note', 'start_date', 'end_date', 'persons', 'budget']) };
+    const t = { ...req.trip, ...pickFields(req.body, ['title', 'note', 'start_date', 'end_date', 'persons', 'budget', 'cover']) };
+    const cover = t.cover && (/^https?:\/\//.test(t.cover) || /^\/api\//.test(t.cover)) ? String(t.cover).slice(0, 600) : null;
     if (!String(t.title || '').trim()) return bad(res, 'Výlet potřebuje název.');
     const budget = Number(t.budget) > 0 ? Number(t.budget) : null;
-    await db.run(`UPDATE trips SET title = ?, note = ?, start_date = ?, end_date = ?, persons = ?, budget = ?, updated_at = datetime('now') WHERE id = ?`,
-      String(t.title).trim().slice(0, 120), String(t.note || '').slice(0, 2000), t.start_date || null, t.end_date || null, Number(t.persons) || 1, budget, t.id);
+    await db.run(`UPDATE trips SET title = ?, note = ?, start_date = ?, end_date = ?, persons = ?, budget = ?, cover = ?, updated_at = datetime('now') WHERE id = ?`,
+      String(t.title).trim().slice(0, 120), String(t.note || '').slice(0, 2000), t.start_date || null, t.end_date || null, Number(t.persons) || 1, budget, cover, t.id);
     res.json(await tripDetail(await db.get('SELECT * FROM trips WHERE id = ?', t.id), req.role, req.user.id));
   });
 
@@ -316,6 +319,7 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
       ['DELETE FROM trip_items WHERE trip_id = ?', req.trip.id],
       ['DELETE FROM trip_members WHERE trip_id = ?', req.trip.id],
       ['DELETE FROM trip_messages WHERE trip_id = ?', req.trip.id],
+      ['DELETE FROM trip_files WHERE trip_id = ?', req.trip.id],
       ['DELETE FROM trip_reads WHERE trip_id = ?', req.trip.id],
       ['DELETE FROM item_votes WHERE item_id IN (SELECT id FROM trip_items WHERE trip_id = ?)', req.trip.id],
       ['DELETE FROM trips WHERE id = ?', req.trip.id],
@@ -364,6 +368,7 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
     res.json(req.role === 'owner' ? await tripDetail(req.trip, req.role, req.user.id) : { ok: true, left: true });
   });
 
+  mediaRoutes(api, { db, withTrip });
   plannerRoutes(api, { db, withTrip, tripDetail, tripRole });
 
   // Sdílení odkazem (jen ke čtení)
@@ -390,6 +395,8 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
   const INDEX = indexHtml(PUBLIC_DIR);
   const sendIndex = (_req, res) => res.type('html').set('Cache-Control', 'no-cache').send(INDEX);
   app.get(['/', '/index.html'], sendIndex);
+  app.use('/vendor/maplibre', express.static(join(PUBLIC_DIR, '..', 'node_modules', 'maplibre-gl', 'dist'), { maxAge: '30d' }));
+  app.use('/vendor/maplibre-leaflet', express.static(join(PUBLIC_DIR, '..', 'node_modules', '@maplibre', 'maplibre-gl-leaflet'), { maxAge: '30d' }));
   app.use('/vendor/leaflet', express.static(join(PUBLIC_DIR, '..', 'node_modules', 'leaflet', 'dist'), { maxAge: '30d' }));
   app.use(express.static(PUBLIC_DIR, {
     setHeaders(res, path) {

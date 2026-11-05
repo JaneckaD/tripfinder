@@ -222,7 +222,7 @@ export async function viewChat(friendId, tripId) {
         <small class="ellipsis">${t.lastMessage ? `${e(t.lastMessage.name.split(' ')[0])}: ${e(t.lastMessage.body)}` : `${t.people} ${t.people === 1 ? 'účastník' : t.people < 5 ? 'účastníci' : 'účastníků'} • zatím bez zpráv`}</small></span>
       <span class="meta">${t.unread ? `<span class="count">${t.unread}</span>` : ''}<small>${t.lastMessage ? timeLabel(t.lastMessage.at) : ''}</small></span></a>`;
   const friendRow = (f) => `<a class="conv${f.id === activeFriend ? ' active' : ''}" href="#/chat/${f.id}" data-name="${e(f.name.toLowerCase())}">
-      <span class="avatar">${e(ctx.initials(f.name))}</span>
+      ${ctx.avatarHtml(f)}
       <span class="grow"><b class="ellipsis">${e(f.name)}</b><small class="ellipsis">${f.lastMessage ? e(f.lastMessage.body) : 'Napiš první zprávu'}</small></span>
       <span class="meta">${f.unread ? `<span class="count">${f.unread}</span>` : ''}<small>${f.lastMessage ? timeLabel(f.lastMessage.at) : ''}</small></span></a>`;
   const activeCount = conv.trips.filter((t) => t.status !== 'done').length;
@@ -239,10 +239,10 @@ export async function viewChat(friendId, tripId) {
         <section class="card bento">
           <div class="card-head"><span class="eyebrow">Přátelé</span><button class="btn soft sm" id="add-friend">${ms('person_add', 'sm')} Přidat</button></div>
           ${data.incoming.length ? `<div class="requests">${data.incoming.map((r) => `
-            <div class="conv req"><span class="avatar">${e(ctx.initials(r.name))}</span><span class="grow"><b class="ellipsis">${e(r.name)}</b><small class="ellipsis">chce být tvůj přítel</small></span>
+            <div class="conv req">${ctx.avatarHtml(r)}<span class="grow"><b class="ellipsis">${e(r.name)}</b><small class="ellipsis">chce být tvůj přítel</small></span>
               <button class="btn sm" data-accept="${r.id}">Přijmout</button><button class="icon-btn" data-decline="${r.id}" aria-label="Odmítnout">${ms('close', 'sm')}</button></div>`).join('')}</div>` : ''}
           <div class="conv-list">${data.friends.map(friendRow).join('') || '<p class="small muted empty-line">Zatím tu nikoho nemáš. Přidej kamaráda podle e-mailu nebo mu pošli pozvánku.</p>'}</div>
-          ${data.outgoing.length ? `<div class="small muted label-sm">Čeká na přijetí</div>${data.outgoing.map((o) => `<div class="conv req muted"><span class="avatar">${e(ctx.initials(o.name))}</span><span class="grow ellipsis">${e(o.name)}</span><button class="btn ghost sm" data-decline="${o.id}">Zrušit</button></div>`).join('')}` : ''}
+          ${data.outgoing.length ? `<div class="small muted label-sm">Čeká na přijetí</div>${data.outgoing.map((o) => `<div class="conv req muted">${ctx.avatarHtml(o)}<span class="grow ellipsis">${e(o.name)}</span><button class="btn ghost sm" data-decline="${o.id}">Zrušit</button></div>`).join('')}` : ''}
         </section>
         <section class="card bento" id="trip-summary" hidden></section>
       </aside>
@@ -273,7 +273,7 @@ function messageList(list, { group }) {
     list.dataset.lastDay = lastDay; list.dataset.lastSender = lastSender;
     const card = m.data?.type === 'place' ? placeCard(m) : '';
     return `${out}<div class="msg${m.mine ? ' mine' : ''}${head ? ' head' : ''}" data-id="${m.id}">
-      ${group && !m.mine ? `<span class="avatar sm">${head ? e(ctx.initials(m.sender.name)) : ''}</span>` : ''}
+      ${group && !m.mine ? `${head ? ctx.avatarHtml(m.sender, 'sm') : '<span class="avatar sm blank"></span>'}` : ''}
       <div class="msg-col">${head ? `<span class="msg-meta"><b>${e(m.sender.name.split(' ')[0])}</b> ${clock(m.at)}</span>` : ''}
         ${m.body ? `<span class="bubble">${linkify(e(m.body))}</span>` : ''}${card}
         ${m.mine || !group ? `<time>${clock(m.at)}</time>` : ''}</div></div>`;
@@ -415,7 +415,7 @@ async function mountConversation(box, id, friend) {
   const e = ctx.esc;
   if (!friend) { box.innerHTML = `<div class="empty"><div class="big">${ms('lock')}</div><p>Psát si můžeš jen s přáteli.</p></div>`; return; }
   box.innerHTML = `
-    <header class="chat-head"><a class="icon-btn back" href="#/chat" aria-label="Zpět">${ms('arrow_back')}</a><span class="conv-ic">${e(ctx.initials(friend.name))}</span>
+    <header class="chat-head"><a class="icon-btn back" href="#/chat" aria-label="Zpět">${ms('arrow_back')}</a>${ctx.avatarHtml(friend)}
       <div class="grow"><b class="ellipsis">${e(friend.name)}</b><small class="muted ellipsis">${e(friend.email || '')}</small></div>
       <button class="btn ghost sm" id="unfriend" title="Odebrat z přátel">Odebrat</button></header>
     <div class="msgs" id="msgs"><div class="skeleton" style="height:60px"></div></div>
