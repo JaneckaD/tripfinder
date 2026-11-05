@@ -87,3 +87,38 @@ test('profilová fotka', async () => {
   assert.equal((await a('/auth/me')).body.user.avatar_v, 0);
   assert.ok(u.id);
 });
+
+test('chat výletu: anketa, kalendářní anketa, dotazník a sdílení z plánu', async () => {
+  const a = client(); const b = client(); const x = client();
+  await register(a, 'mira'); await register(b, 'zuzka'); await register(x, 'mimo');
+  const { trip } = (await a('/trips', { method: 'POST', body: { title: 'Krkonoše' } })).body;
+  await a(`/trips/${trip.id}/members`, { method: 'POST', body: { email: 'zuzka@p.cz' } });
+  const post = (c, data) => c(`/trips/${trip.id}/chat`, { method: 'POST', body: { data } });
+  assert.equal((await post(a, { type: 'poll', title: 'Kam?', options: ['Jen jedna'] })).status, 400);
+  const poll = (await post(a, { type: 'poll', title: 'Kam na večeři?', options: ['Pizza', 'Burger', ''] })).body.message;
+  assert.deepEqual(poll.data.options, ['Pizza', 'Burger']);
+  let r = (await b(`/trips/${trip.id}/chat/${poll.id}/answer`, { method: 'POST', body: { value: [1, 0] } })).body;
+  assert.deepEqual(r.answers[poll.id][0].value, [0]); // jedna odpověď, když není multi
+  const dp = (await post(a, { type: 'datepoll', title: 'Kdy?', dates: ['2027-01-10', '2027-01-09', 'nesmysl'] })).body.message;
+  assert.deepEqual(dp.data.dates, ['2027-01-09', '2027-01-10']);
+  await a(`/trips/${trip.id}/chat/${dp.id}/answer`, { method: 'POST', body: { value: [0, 1, 7] } });
+  const sv = (await post(b, { type: 'survey', title: 'Jídlo', questions: ['Alergie?', 'Rozpočet?'] })).body.message;
+  await a(`/trips/${trip.id}/chat/${sv.id}/answer`, { method: 'POST', body: { value: ['ořechy', ''] } });
+  const chat = (await b(`/trips/${trip.id}/chat`)).body;
+  assert.deepEqual(chat.answers[dp.id][0].value, [0, 1]);
+  assert.deepEqual(chat.answers[sv.id][0].value, ['ořechy', '']);
+  // uzavřít může jen autor nebo organizátor
+  assert.equal((await b(`/trips/${trip.id}/chat/${poll.id}/close`, { method: 'POST' })).status, 403);
+  assert.equal((await a(`/trips/${trip.id}/chat/${poll.id}/close`, { method: 'POST' })).body.message.data.closed, true);
+  assert.equal((await b(`/trips/${trip.id}/chat/${poll.id}/answer`, { method: 'POST', body: { value: [1] } })).status, 400);
+  // sdílení položky z plánu a stavu plateb
+  const d = (await a(`/trips/${trip.id}/items`, { method: 'POST', body: { kind: 'note', data: { title: 'Sněžka', category: 'nature' } } })).body;
+  assert.equal((await post(a, { type: 'item', itemId: 99999 })).status, 400);
+  assert.equal((await post(a, { type: 'item', itemId: d.items[0].id, title: 'Sněžka' })).status, 201);
+  assert.equal((await post(a, { type: 'payments' })).status, 201);
+  assert.match((await b('/conversations')).body.trips[0].lastMessage.body, /plateb/);
+  assert.equal((await x(`/trips/${trip.id}/chat/${poll.id}/answer`, { method: 'POST', body: { value: [0] } })).status, 404);
+  // cena za osobu
+  const it = (await a(`/trips/${trip.id}/items/${d.items[0].id}`, { method: 'PATCH', body: { cost: 600, priceMode: 'person', unitCost: 300, category: 'nature' } })).body.items[0];
+  assert.deepEqual([it.price, it.data.priceMode, it.data.unitCost, it.data.category], [600, 'person', 300, 'nature']);
+});

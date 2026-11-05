@@ -316,12 +316,13 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
 
   api.delete('/trips/:id', requireUser, withTrip('owner'), async (req, res) => {
     await db.batch([
+      ['DELETE FROM item_votes WHERE item_id IN (SELECT id FROM trip_items WHERE trip_id = ?)', req.trip.id],
       ['DELETE FROM trip_items WHERE trip_id = ?', req.trip.id],
       ['DELETE FROM trip_members WHERE trip_id = ?', req.trip.id],
+      ['DELETE FROM chat_answers WHERE message_id IN (SELECT id FROM trip_messages WHERE trip_id = ?)', req.trip.id],
       ['DELETE FROM trip_messages WHERE trip_id = ?', req.trip.id],
       ['DELETE FROM trip_files WHERE trip_id = ?', req.trip.id],
       ['DELETE FROM trip_reads WHERE trip_id = ?', req.trip.id],
-      ['DELETE FROM item_votes WHERE item_id IN (SELECT id FROM trip_items WHERE trip_id = ?)', req.trip.id],
       ['DELETE FROM trips WHERE id = ?', req.trip.id],
     ]);
     res.json({ ok: true });

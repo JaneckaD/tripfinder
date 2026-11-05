@@ -59,10 +59,11 @@ Proměnné prostředí:
 - **Cestovatelský pas** – dokončený výlet přidá do profilu razítko každé navštívené země (Francie má croissant, Itálie pizzu…).
 - **Účty** – registrace a přihlášení (hesla hashovaná scryptem, session v HttpOnly cookie).
 - **Výlety** – libovolný počet, ukládání destinací, dopravy, ubytování a poznámek s cenou, součet rozpočtu a cena na osobu.
-- **Návrhy party** – každý má u návrhu jeden hlas pro, nebo proti; stav (Nový návrh, Hlasuje se, Schváleno, Zamítnuto) se počítá z hlasů. Místo jde dohledat našeptávačem a uloží se i na mapu.
+- **Nápady party** – nápad může být cokoliv (jídlo, příroda, večer a bary, nákupy, akce, odpočinek…); každý má jeden hlas pro, nebo proti a stav (Nový nápad, Hlasuje se, Schváleno, Zamítnuto) se počítá z hlasů. Místo je nepovinné, s ním se nápad ukáže i na mapě.
+- **Chat výletu** – kromě zpráv anketa, kalendářní anketa (kdo má kdy volno), dotazník, sdílení místa, položky nebo celého dne z itineráře a aktuální stav plateb.
 - **Doprava ve výletu** – vyhledání spoje pro konkrétní den, nebo vlastní spoj: dopravce, odkud a kam, odjezd a příjezd, místa, kód rezervace a nahraný QR kód jízdenky.
 - **Ubytování ve výletu** – hledání na Airbnb s fotkami, odkaz na Booking.com s vyplněným termínem (Booking nemá veřejné API) a vlastní ubytování s nahranými fotkami a volbou náhledového obrázku.
-- **Platby** – u každé položky cena, termín splatnosti a kdo se na ní podílí; každý vidí, kolik a za co ještě doplácí, a svůj podíl si odškrtne. Organizátor odškrtává i za ostatní.
+- **Platby** – u každé položky cena (celkem, nebo za osobu – systém ji rozpočítá), termín splatnosti a kdo se na ní podílí; každý vidí, kolik a za co ještě doplácí, a svůj podíl si odškrtne. Organizátor odškrtává i za ostatní.
 - **Fotky** – profilová fotka, náhledový obrázek výletu a fotky ubytování a jízdenek se zmenší v prohlížeči a uloží do databáze (tabulka `trip_files`, sloupec `users.avatar`).
 - **Spolucestující** – pozvání e-mailem s rolí „upravuje“ nebo „jen čte“. Kdo ještě nemá účet, uvidí výlet hned po registraci.
 - **Sdílení** – veřejný odkaz jen pro čtení, jde kdykoli zrušit.
