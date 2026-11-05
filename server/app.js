@@ -12,6 +12,8 @@ import { makeCache } from './providers/live/common.js';
 import { createProviders } from './providers/index.js';
 import { createExtras } from './extras.js';
 import { profileOf, socialRouter } from './social.js';
+import { plannerRoutes } from './planner.js';
+import { indexHtml } from './icons.js';
 import compression from 'compression';
 import { countries } from 'countries-list';
 
@@ -244,16 +246,20 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
     next();
   };
 
-  const tripDetail = async (trip, role) => {
-    const [itemRows, members, owner] = await Promise.all([
+  const tripDetail = async (trip, role, userId = null) => {
+    const [itemRows, members, owner, votes] = await Promise.all([
       db.all('SELECT * FROM trip_items WHERE trip_id = ? ORDER BY created_at, id', trip.id),
       db.all(`SELECT m.id, m.email, m.role, m.user_id, u.name FROM trip_members m
         LEFT JOIN users u ON u.id = m.user_id WHERE m.trip_id = ? ORDER BY m.id`, trip.id),
       db.get('SELECT id, name, email FROM users WHERE id = ?', trip.owner_id),
+      db.all('SELECT v.item_id, v.user_id FROM item_votes v JOIN trip_items i ON i.id = v.item_id WHERE i.trip_id = ?', trip.id),
     ]);
-    const items = itemRows.map((it) => ({ ...it, data: JSON.parse(it.data) }));
+    const items = itemRows.map((it) => {
+      const mine = votes.filter((v) => v.item_id === it.id);
+      return { ...it, data: JSON.parse(it.data), votes: mine.length, voted: mine.some((v) => v.user_id === userId) };
+    });
     const total = items.reduce((sum, it) => sum + (it.price || 0), 0);
-    return { trip: { ...trip, share_token: role === 'owner' ? trip.share_token : undefined }, role, owner, items, members, total };
+    return { trip: { ...trip, share_token: role === 'owner' ? trip.share_token : undefined, invite_token: role === 'owner' ? trip.invite_token : undefined }, role, owner, items, members, total };
   };
 
   api.get('/trips', requireUser, async (req, res) => {
@@ -284,10 +290,10 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
       }));
     }
     const trip = await db.get('SELECT * FROM trips WHERE id = ?', lastInsertRowid);
-    res.status(201).json(await tripDetail(trip, 'owner'));
+    res.status(201).json(await tripDetail(trip, 'owner', req.user.id));
   });
 
-  api.get('/trips/:id', requireUser, withTrip('viewer'), async (req, res) => res.json(await tripDetail(req.trip, req.role)));
+  api.get('/trips/:id', requireUser, withTrip('viewer'), async (req, res) => res.json(await tripDetail(req.trip, req.role, req.user.id)));
 
   api.patch('/trips/:id', requireUser, withTrip('editor'), async (req, res) => {
     const t = { ...req.trip, ...pickFields(req.body, ['title', 'note', 'start_date', 'end_date', 'persons', 'budget']) };
@@ -295,20 +301,23 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
     const budget = Number(t.budget) > 0 ? Number(t.budget) : null;
     await db.run(`UPDATE trips SET title = ?, note = ?, start_date = ?, end_date = ?, persons = ?, budget = ?, updated_at = datetime('now') WHERE id = ?`,
       String(t.title).trim().slice(0, 120), String(t.note || '').slice(0, 2000), t.start_date || null, t.end_date || null, Number(t.persons) || 1, budget, t.id);
-    res.json(await tripDetail(await db.get('SELECT * FROM trips WHERE id = ?', t.id), req.role));
+    res.json(await tripDetail(await db.get('SELECT * FROM trips WHERE id = ?', t.id), req.role, req.user.id));
   });
 
   // Dokončit výlet (získáš razítka zemí do pasu) / vrátit mezi plánované
   api.post('/trips/:id/status', requireUser, withTrip('owner'), async (req, res) => {
     const done = req.body?.status === 'done';
     await db.run(`UPDATE trips SET status = ?, completed_at = ${done ? "datetime('now')" : 'NULL'}, updated_at = datetime('now') WHERE id = ?`, done ? 'done' : 'planned', req.trip.id);
-    res.json(await tripDetail(await db.get('SELECT * FROM trips WHERE id = ?', req.trip.id), req.role));
+    res.json(await tripDetail(await db.get('SELECT * FROM trips WHERE id = ?', req.trip.id), req.role, req.user.id));
   });
 
   api.delete('/trips/:id', requireUser, withTrip('owner'), async (req, res) => {
     await db.batch([
       ['DELETE FROM trip_items WHERE trip_id = ?', req.trip.id],
       ['DELETE FROM trip_members WHERE trip_id = ?', req.trip.id],
+      ['DELETE FROM trip_messages WHERE trip_id = ?', req.trip.id],
+      ['DELETE FROM trip_reads WHERE trip_id = ?', req.trip.id],
+      ['DELETE FROM item_votes WHERE item_id IN (SELECT id FROM trip_items WHERE trip_id = ?)', req.trip.id],
       ['DELETE FROM trips WHERE id = ?', req.trip.id],
     ]);
     res.json({ ok: true });
@@ -325,12 +334,13 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
         req.trip.id, kind, JSON.stringify(data).slice(0, 20000), price, data.currency || (price != null ? 'CZK' : null), req.user.id],
       [`UPDATE trips SET updated_at = datetime('now') WHERE id = ?`, req.trip.id],
     ]);
-    res.status(201).json(await tripDetail(req.trip, req.role));
+    res.status(201).json(await tripDetail(req.trip, req.role, req.user.id));
   });
 
   api.delete('/trips/:id/items/:itemId', requireUser, withTrip('editor'), async (req, res) => {
+    await db.run('DELETE FROM item_votes WHERE item_id = (SELECT id FROM trip_items WHERE id = ? AND trip_id = ?)', Number(req.params.itemId) || 0, req.trip.id);
     await db.run('DELETE FROM trip_items WHERE id = ? AND trip_id = ?', Number(req.params.itemId) || 0, req.trip.id);
-    res.json(await tripDetail(req.trip, req.role));
+    res.json(await tripDetail(req.trip, req.role, req.user.id));
   });
 
   // Spolucestující
@@ -342,7 +352,7 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
     const existing = await db.get('SELECT id FROM users WHERE email = ?', email.trim());
     await db.run(`INSERT INTO trip_members (trip_id, user_id, email, role) VALUES (?, ?, ?, ?)
       ON CONFLICT(trip_id, email) DO UPDATE SET role = excluded.role`, req.trip.id, existing?.id ?? null, email.trim(), role);
-    res.status(201).json(await tripDetail(req.trip, req.role));
+    res.status(201).json(await tripDetail(req.trip, req.role, req.user.id));
   });
 
   api.delete('/trips/:id/members/:memberId', requireUser, withTrip('viewer'), async (req, res) => {
@@ -351,8 +361,10 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
     // Vlastník může odebrat kohokoli, člen může odejít sám.
     if (req.role !== 'owner' && m.user_id !== req.user.id) return bad(res, 'Na tuto akci nemáš oprávnění.', 403);
     await db.run('DELETE FROM trip_members WHERE id = ?', m.id);
-    res.json(req.role === 'owner' ? await tripDetail(req.trip, req.role) : { ok: true, left: true });
+    res.json(req.role === 'owner' ? await tripDetail(req.trip, req.role, req.user.id) : { ok: true, left: true });
   });
+
+  plannerRoutes(api, { db, withTrip, tripDetail, tripRole });
 
   // Sdílení odkazem (jen ke čtení)
   api.post('/trips/:id/share', requireUser, withTrip('owner'), async (req, res) => {
@@ -375,13 +387,16 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
   app.use('/api', api);
 
   // ---------- Frontend (PWA) ----------
+  const INDEX = indexHtml(PUBLIC_DIR);
+  const sendIndex = (_req, res) => res.type('html').set('Cache-Control', 'no-cache').send(INDEX);
+  app.get(['/', '/index.html'], sendIndex);
   app.use('/vendor/leaflet', express.static(join(PUBLIC_DIR, '..', 'node_modules', 'leaflet', 'dist'), { maxAge: '30d' }));
   app.use(express.static(PUBLIC_DIR, {
     setHeaders(res, path) {
       if (path.endsWith('sw.js')) res.setHeader('Cache-Control', 'no-cache');
     },
   }));
-  app.get('/{*path}', (_req, res) => res.sendFile(join(PUBLIC_DIR, 'index.html')));
+  app.get('/{*path}', sendIndex);
 
   // eslint-disable-next-line no-unused-vars
   app.use((err, _req, res, _next) => {

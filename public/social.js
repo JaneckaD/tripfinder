@@ -1,10 +1,10 @@
 // Profil cestovatele (úvodní dotazník + úpravy), přátelé, pozvánky a chat.
-import { autocomplete } from './widgets.js';
+import { autocomplete, ms } from './widgets.js';
 
 let ctx; // { api, esc, toast, state, $app, initials, requireLogin, emptyState, route }
 export function setupSocial(c) { ctx = c; }
 
-const flag = (cc) => (cc && cc.length === 2 ? String.fromCodePoint(...[...cc.toUpperCase()].map((ch) => 0x1f1a5 + ch.charCodeAt(0))) : '🏳️');
+const flag = (cc) => (cc ? String(cc).toUpperCase() : '');
 const langName = (() => { const dn = new Intl.DisplayNames(['cs'], { type: 'language' }); return (c) => { try { return dn.of(c); } catch { return c; } }; })();
 const LANGS = ['cs', 'sk', 'en', 'de', 'fr', 'es', 'it', 'pt', 'pl', 'hu', 'ru', 'uk', 'nl', 'sv', 'no', 'da', 'fi', 'el', 'tr', 'hr', 'sl', 'sr', 'ro', 'bg', 'ar', 'he', 'zh', 'ja', 'ko', 'th', 'vi', 'id', 'hi'];
 const EU = new Set('AT BE BG HR CY CZ DK EE FI FR DE GR HU IE IT LV LT LU MT NL PL PT RO SK SI ES SE IS LI NO CH'.split(' '));
@@ -38,18 +38,18 @@ export function profileHints(dest, langCodes = []) {
   const cc = (dest.cc || '').toUpperCase();
   if (cc && p.passports.length) {
     const inEU = p.passports.some((x) => EU.has(x));
-    if (p.passports.includes(cc)) out.push(`🛂 Cestuješ do své země (${flag(cc)}), stačí doklad.`);
-    else if (inEU && EU.has(cc)) out.push('🛂 Schengen / EU: bez víza, stačí občanský průkaz.');
-    else out.push(`🛂 Pas ${p.passports.map(flag).join(' ')}: ověř si vízum na <a href="https://www.mzv.gov.cz/jnp/cz/cestujeme/" target="_blank" rel="noopener">mzv.gov.cz – Cestujeme</a>.`);
+    if (p.passports.includes(cc)) out.push(`${ms('badge')} Cestuješ do své země (${flag(cc)}), stačí doklad.`);
+    else if (inEU && EU.has(cc)) out.push(ms('badge') + 'Schengen / EU: bez víza, stačí občanský průkaz.');
+    else out.push(`${ms('badge')} Pas ${p.passports.map(flag).join(' ')}: ověř si vízum na <a href="https://www.mzv.gov.cz/jnp/cz/cestujeme/" target="_blank" rel="noopener">mzv.gov.cz – Cestujeme</a>.`);
   }
   if (langCodes.length && p.languages.length) {
     const common = langCodes.filter((l) => p.languages.includes(l));
-    if (common.length) out.push(`🗣️ Domluvíš se místním jazykem: ${common.map(langName).join(', ')}.`);
-    else if (p.languages.includes('en')) out.push(`🗣️ Místně se mluví ${langCodes.slice(0, 2).map(langName).join(', ')} – v turistických místech s angličtinou nebude problém.`);
-    else out.push(`🗣️ Místní jazyk: ${langCodes.slice(0, 2).map(langName).join(', ')}. Hodí se offline překladač.`);
+    if (common.length) out.push(`${ms('translate')} Domluvíš se místním jazykem: ${common.map(langName).join(', ')}.`);
+    else if (p.languages.includes('en')) out.push(`${ms('translate')} Místně se mluví ${langCodes.slice(0, 2).map(langName).join(', ')} – v turistických místech s angličtinou nebude problém.`);
+    else out.push(`${ms('translate')} Místní jazyk: ${langCodes.slice(0, 2).map(langName).join(', ')}. Hodí se offline překladač.`);
   }
   const d = ageDiscount(p);
-  if (d) out.push(`🎟️ ${d.label}.`);
+  if (d) out.push(`${ms('confirmation_number')} ${d.label}.`);
   return out.length ? `<div class="profile-hints">${out.map((h) => `<div>${h}</div>`).join('')}</div>` : '';
 }
 
@@ -110,7 +110,7 @@ function mountProfileFields(root, p, list) {
   const birth = root.querySelector('#pf-birth'); const ageOut = root.querySelector('#pf-age');
   const showAge = () => {
     const d = birth.value ? ageDiscount({ age: Math.floor((Date.now() - new Date(birth.value)) / 31557600000) }) : null;
-    ageOut.innerHTML = d ? `<span class="pill mint">🎟️ ${ctx.esc(d.label)}</span>` : '';
+    ageOut.innerHTML = d ? `<span class="pill mint">${ms('confirmation_number')} ${ctx.esc(d.label)}</span>` : '';
   };
   birth.addEventListener('change', showAge); showAge();
   return () => {
@@ -138,7 +138,7 @@ export async function viewWelcome() {
   ctx.$app.innerHTML = `
     <div class="glass-card auth welcome">
       <span class="pill coral">PÁR OTÁZEK NA ZAČÁTEK</span>
-      <h1 style="margin-top:12px">Ahoj ${ctx.esc(ctx.state.user.name)} 👋</h1>
+      <h1 style="margin-top:12px">Ahoj ${ctx.esc(ctx.state.user.name)}</h1>
       <p class="muted" style="margin-top:6px">Podle toho ti ukážeme spoje z tvého města, slevy podle věku, jestli potřebuješ vízum a kde se domluvíš. Všechno jde kdykoli změnit v profilu.</p>
       <form id="wf">${profileFields(p, list)}
         <div class="error" id="err"></div>
@@ -150,7 +150,7 @@ export async function viewWelcome() {
   document.getElementById('skip').onclick = async () => { await saveProfile({ onboarded: true }).catch(() => {}); done(); };
   document.getElementById('wf').addEventListener('submit', async (e) => {
     e.preventDefault();
-    try { await saveProfile({ ...read(), onboarded: true }); ctx.toast('Profil uložen ✓'); done(); } catch (err) { document.getElementById('err').textContent = err.message; }
+    try { await saveProfile({ ...read(), onboarded: true }); ctx.toast('Profil uložen'); done(); } catch (err) { document.getElementById('err').textContent = err.message; }
   });
 }
 
@@ -170,7 +170,7 @@ export async function profileBlock(root) {
     e.preventDefault();
     try {
       await saveProfile({ ...read(), name: root.querySelector('#pf-name').value, onboarded: true });
-      ctx.renderAccount(); ctx.toast('Profil uložen ✓');
+      ctx.renderAccount(); ctx.toast('Profil uložen');
     } catch (err) { root.querySelector('#perr').textContent = err.message; }
   });
 }
@@ -185,71 +185,255 @@ export async function refreshBadge() {
     const total = n.unread + n.requests;
     document.querySelectorAll('[data-chat-badge]').forEach((b) => { b.textContent = total > 9 ? '9+' : total || ''; b.hidden = !total; });
     if (total !== (refreshBadge.last ?? total) && location.hash === '#/chat' && !document.querySelector('.modal')) viewChat();
-    if (total > (refreshBadge.last ?? total) && !location.hash.startsWith('#/chat')) ctx.toast(n.requests > (refreshBadge.req ?? 0) ? '👋 Nová žádost o přátelství' : '💬 Nová zpráva');
+    if (total > (refreshBadge.last ?? total) && !location.hash.startsWith('#/chat')) ctx.toast(n.requests > (refreshBadge.req ?? 0) ? 'Nová žádost o přátelství' : 'Nová zpráva');
     refreshBadge.last = total; refreshBadge.req = n.requests;
   } catch { /* offline */ }
   pollTimer = setTimeout(refreshBadge, document.hidden ? 120000 : 25000);
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden && ctx?.state.user) refreshBadge(); });
 
-// ---------- Přátelé a chat ----------
+// ---------- Chat: skupinové chaty výletů + zprávy s přáteli ----------
 const timeLabel = (iso) => {
   if (!iso) return '';
-  const d = new Date(iso); const today = new Date().toDateString() === d.toDateString();
+  const d = new Date(iso.includes('T') ? iso : `${iso.replace(' ', 'T')}Z`); const today = new Date().toDateString() === d.toDateString();
   return today ? d.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString('cs-CZ', { day: 'numeric', month: 'numeric' });
 };
+const clock = (iso) => new Date(iso).toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' });
+const dayStamp = (iso) => {
+  const d = new Date(iso); const t = new Date();
+  const label = d.toLocaleDateString('cs-CZ', { day: 'numeric', month: 'long' });
+  if (d.toDateString() === t.toDateString()) return `Dnes • ${label}`;
+  if (d.toDateString() === new Date(t.getTime() - 86400000).toDateString()) return `Včera • ${label}`;
+  return label;
+};
+const daysTo = (start) => (start ? Math.ceil((new Date(start) - new Date(new Date().toDateString())) / 86400000) : null);
+const linkify = (html) => html.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
 let chatTimer;
 
-export async function viewChat(friendId) {
+export async function viewChat(friendId, tripId) {
   clearTimeout(chatTimer);
   if (!ctx.requireLogin()) return;
   const e = ctx.esc;
-  const data = await ctx.api('/friends');
-  const active = friendId ? Number(friendId) : null;
-  const friendRow = (f) => `<a class="friend-row${f.id === active ? ' active' : ''}" href="#/chat/${f.id}">
-      <span class="avatar ${['', 'sky', 'gold', 'lav'][f.id % 4]}">${e(ctx.initials(f.name))}</span>
-      <span class="grow"><b>${e(f.name)}</b><span class="small muted ellipsis">${f.lastMessage ? e(f.lastMessage.body) : 'Napiš první zprávu 👋'}</span></span>
-      <span class="meta">${f.lastMessage ? `<span class="small muted">${timeLabel(f.lastMessage.at)}</span>` : ''}${f.unread ? `<span class="count">${f.unread}</span>` : ''}</span></a>`;
+  const [data, conv] = await Promise.all([ctx.api('/friends'), ctx.api('/conversations')]);
+  const activeFriend = friendId ? Number(friendId) : null;
+  const activeTrip = tripId ? Number(tripId) : null;
+  const tripRow = (t) => `<a class="conv${t.id === activeTrip ? ' active' : ''}${t.status === 'done' ? ' done' : ''}" href="#/chat/t/${t.id}" data-name="${e(t.title.toLowerCase())}">
+      <span class="grow"><b class="ellipsis">${e(t.title)}${t.status === 'done' ? ' <span class="tag">Archiv</span>' : ''}</b>
+        <small class="ellipsis">${t.lastMessage ? `${e(t.lastMessage.name.split(' ')[0])}: ${e(t.lastMessage.body)}` : `${t.people} ${t.people === 1 ? 'účastník' : t.people < 5 ? 'účastníci' : 'účastníků'} • zatím bez zpráv`}</small></span>
+      <span class="meta">${t.unread ? `<span class="count">${t.unread}</span>` : ''}<small>${t.lastMessage ? timeLabel(t.lastMessage.at) : ''}</small></span></a>`;
+  const friendRow = (f) => `<a class="conv${f.id === activeFriend ? ' active' : ''}" href="#/chat/${f.id}" data-name="${e(f.name.toLowerCase())}">
+      <span class="avatar">${e(ctx.initials(f.name))}</span>
+      <span class="grow"><b class="ellipsis">${e(f.name)}</b><small class="ellipsis">${f.lastMessage ? e(f.lastMessage.body) : 'Napiš první zprávu'}</small></span>
+      <span class="meta">${f.unread ? `<span class="count">${f.unread}</span>` : ''}<small>${f.lastMessage ? timeLabel(f.lastMessage.at) : ''}</small></span></a>`;
+  const activeCount = conv.trips.filter((t) => t.status !== 'done').length;
+  const has = activeFriend || activeTrip;
   ctx.$app.innerHTML = `
-    <div class="chat-page${active ? ' has-active' : ''}">
-      <aside class="glass-card chat-side">
-        <div class="section-head"><h2>Přátelé</h2><button class="btn sm" id="add-friend">+ Přidat</button></div>
-        ${data.incoming.length ? `<div class="requests"><div class="small muted label">Žádosti o přátelství</div>${data.incoming.map((r) => `
-          <div class="req-row"><span class="avatar gold">${e(ctx.initials(r.name))}</span><span class="grow"><b>${e(r.name)}</b><span class="small muted">${e(r.email)}</span></span>
-            <button class="btn sm" data-accept="${r.id}">Přijmout</button><button class="btn ghost sm" data-decline="${r.id}" aria-label="Odmítnout">✕</button></div>`).join('')}</div>` : ''}
-        <div class="friend-list">${data.friends.map(friendRow).join('') || '<p class="muted small" style="padding:12px 4px">Zatím tu nikoho nemáš. Přidej kamaráda podle e-mailu nebo mu pošli pozvánku.</p>'}</div>
-        ${data.outgoing.length ? `<div class="small muted label" style="margin-top:12px">Čeká na přijetí</div>${data.outgoing.map((o) => `<div class="req-row muted"><span class="avatar">${e(ctx.initials(o.name))}</span><span class="grow">${e(o.name)}</span><button class="btn ghost sm" data-decline="${o.id}">Zrušit</button></div>`).join('')}` : ''}
+    <div class="page-head chat-hero"><div><span class="eyebrow"><i class="live-dot"></i> Společné plánování v reálném čase</span><h1 class="h-lg">Skupinový chat & kurace</h1></div></div>
+    <div class="chat-page${has ? ' has-active' : ''}">
+      <aside class="chat-side">
+        <div class="search-pill">${ms('search')}<input id="chat-q" placeholder="Hledat konverzaci…" aria-label="Hledat konverzaci"></div>
+        <section class="card bento">
+          <div class="card-head"><span class="eyebrow">Aktivní plány</span><span class="tag">${activeCount} ${activeCount === 1 ? 'cesta' : activeCount > 1 && activeCount < 5 ? 'cesty' : 'cest'}</span></div>
+          <div class="conv-list">${conv.trips.map(tripRow).join('') || `<p class="small muted empty-line">Každý výlet má vlastní skupinový chat. <a href="#/trips">Založ první výlet</a>.</p>`}</div>
+        </section>
+        <section class="card bento">
+          <div class="card-head"><span class="eyebrow">Přátelé</span><button class="btn soft sm" id="add-friend">${ms('person_add', 'sm')} Přidat</button></div>
+          ${data.incoming.length ? `<div class="requests">${data.incoming.map((r) => `
+            <div class="conv req"><span class="avatar">${e(ctx.initials(r.name))}</span><span class="grow"><b class="ellipsis">${e(r.name)}</b><small class="ellipsis">chce být tvůj přítel</small></span>
+              <button class="btn sm" data-accept="${r.id}">Přijmout</button><button class="icon-btn" data-decline="${r.id}" aria-label="Odmítnout">${ms('close', 'sm')}</button></div>`).join('')}</div>` : ''}
+          <div class="conv-list">${data.friends.map(friendRow).join('') || '<p class="small muted empty-line">Zatím tu nikoho nemáš. Přidej kamaráda podle e-mailu nebo mu pošli pozvánku.</p>'}</div>
+          ${data.outgoing.length ? `<div class="small muted label-sm">Čeká na přijetí</div>${data.outgoing.map((o) => `<div class="conv req muted"><span class="avatar">${e(ctx.initials(o.name))}</span><span class="grow ellipsis">${e(o.name)}</span><button class="btn ghost sm" data-decline="${o.id}">Zrušit</button></div>`).join('')}` : ''}
+        </section>
+        <section class="card bento" id="trip-summary" hidden></section>
       </aside>
-      <section class="glass-card chat-main" id="chat-main">${active ? '' : `<div class="empty"><div class="big">💬</div><p>Vyber kamaráda a napiš mu, kam pojedete.</p></div>`}</section>
+      <section class="card chat-main" id="chat-main">${has ? '<div class="skeleton" style="height:100%;min-height:300px"></div>' : `<div class="empty"><div class="big">${ms('forum')}</div><p>Vyber výlet nebo kamaráda a domluvte se, kam pojedete.</p></div>`}</section>
     </div>`;
   ctx.$app.querySelector('#add-friend').onclick = addFriendModal;
-  ctx.$app.querySelectorAll('[data-accept]').forEach((b) => { b.onclick = async () => { await ctx.api(`/friends/${b.dataset.accept}/accept`, { method: 'POST' }); ctx.toast('Teď jste přátelé 🎉'); location.hash = `#/chat/${b.dataset.accept}`; refreshBadge(); }; });
-  ctx.$app.querySelectorAll('[data-decline]').forEach((b) => { b.onclick = async () => { await ctx.api(`/friends/${b.dataset.decline}`, { method: 'DELETE' }); refreshBadge(); viewChat(friendId); }; });
-  if (active) await mountConversation(document.getElementById('chat-main'), active, data.friends.find((f) => f.id === active));
+  ctx.$app.querySelector('#chat-q').addEventListener('input', (ev) => {
+    const q = ev.target.value.trim().toLowerCase();
+    ctx.$app.querySelectorAll('.conv[data-name]').forEach((a) => { a.hidden = q && !a.dataset.name.includes(q); });
+  });
+  ctx.$app.querySelectorAll('[data-accept]').forEach((b) => { b.onclick = async () => { await ctx.api(`/friends/${b.dataset.accept}/accept`, { method: 'POST' }); ctx.toast('Teď jste přátelé'); location.hash = `#/chat/${b.dataset.accept}`; refreshBadge(); }; });
+  ctx.$app.querySelectorAll('[data-decline]').forEach((b) => { b.onclick = async () => { await ctx.api(`/friends/${b.dataset.decline}`, { method: 'DELETE' }); refreshBadge(); viewChat(friendId, tripId); }; });
+  const box = document.getElementById('chat-main');
+  if (activeTrip) await mountTripChat(box, activeTrip, conv.trips.find((t) => t.id === activeTrip));
+  else if (activeFriend) await mountConversation(box, activeFriend, data.friends.find((f) => f.id === activeFriend));
+}
+
+// Společné prvky obou typů konverzace
+function messageList(list, { group }) {
+  const e = ctx.esc;
+  let lastDay = list.dataset.lastDay || ''; let lastSender = list.dataset.lastSender || '';
+  return (messages) => messages.map((m) => {
+    const day = new Date(m.at).toDateString();
+    let out = '';
+    if (day !== lastDay) { out += `<div class="day-sep"><span>${dayStamp(m.at)}</span></div>`; lastDay = day; lastSender = ''; }
+    const head = group && !m.mine && lastSender !== String(m.sender?.id);
+    lastSender = String(m.mine ? 'me' : m.sender?.id);
+    list.dataset.lastDay = lastDay; list.dataset.lastSender = lastSender;
+    const card = m.data?.type === 'place' ? placeCard(m) : '';
+    return `${out}<div class="msg${m.mine ? ' mine' : ''}${head ? ' head' : ''}" data-id="${m.id}">
+      ${group && !m.mine ? `<span class="avatar sm">${head ? e(ctx.initials(m.sender.name)) : ''}</span>` : ''}
+      <div class="msg-col">${head ? `<span class="msg-meta"><b>${e(m.sender.name.split(' ')[0])}</b> ${clock(m.at)}</span>` : ''}
+        ${m.body ? `<span class="bubble">${linkify(e(m.body))}</span>` : ''}${card}
+        ${m.mine || !group ? `<time>${clock(m.at)}</time>` : ''}</div></div>`;
+  }).join('');
+}
+
+let tripCache = null;
+function placeCard(m) {
+  const e = ctx.esc; const d = m.data;
+  const item = tripCache?.items.find((i) => i.id === d.itemId);
+  return `<div class="place-card" data-msg="${m.id}">
+    <div class="pc-img">${d.image ? `<img src="${e(d.image)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}${ms('location_on')}
+      <span class="pc-txt"><b>${e(d.title)}</b>${d.subtitle ? `<small>${e(d.subtitle)}</small>` : ''}</span></div>
+    <div class="pc-actions">
+      ${item ? `<button class="btn soft sm${item.voted ? ' on' : ''}" data-vote="${item.id}">${ms('thumb_up', 'sm')} Souhlasím (${item.votes})</button>` : '<span></span>'}
+      ${item ? `<a class="btn sm" href="#/trips/${tripCache.trip.id}">${ms('event_note', 'sm')} V itineráři</a>` : `<button class="btn sm" data-add-place="${m.id}">${ms('add', 'sm')} Přidat do itineráře</button>`}
+    </div></div>`;
+}
+
+async function mountTripChat(box, id, conv) {
+  const e = ctx.esc;
+  if (!conv) { box.innerHTML = `<div class="empty"><div class="big">${ms('lock')}</div><p>Tento výlet nenajdeme. Možná tě z něj organizátor odebral.</p></div>`; return; }
+  tripCache = await ctx.api(`/trips/${id}`).catch(() => null);
+  const t = tripCache?.trip || conv;
+  const left = daysTo(t.start_date);
+  const places = tripCache ? tripCache.items.filter((i) => i.kind !== 'destination').length : conv.places;
+  box.innerHTML = `
+    <header class="chat-head">
+      <a class="icon-btn back" href="#/chat" aria-label="Zpět">${ms('arrow_back')}</a>
+      <span class="conv-ic">${e(ctx.initials(t.title))}</span>
+      <div class="grow"><div class="ch-title"><b class="ellipsis">${e(t.title)}</b>${left != null && left >= 0 && t.status !== 'done' ? `<span class="tag">${left === 0 ? 'Odjezd dnes' : `Zbývá ${left} ${left === 1 ? 'den' : left < 5 ? 'dny' : 'dní'} do odletu`}</span>` : ''}</div>
+        <small class="muted ellipsis">${conv.people} ${conv.people === 1 ? 'účastník' : conv.people < 5 ? 'účastníci' : 'účastníků'}${t.start_date ? ` • ${ctx.fmtRange(t.start_date, t.end_date)}` : ''} • ${places} ${places === 1 ? 'uložené místo' : places > 1 && places < 5 ? 'uložená místa' : 'uložených míst'}</small></div>
+      <a class="btn soft sm hide-sm" href="#/trips/${id}">${ms('map', 'sm')} Zobrazit itinerář</a>
+    </header>
+    <div class="msgs" id="msgs"><div class="skeleton" style="height:60px"></div></div>
+    <div class="composer-wrap">
+      <form class="composer" id="composer">
+        <button type="button" class="icon-btn" id="share-place" title="Sdílet místo" aria-label="Sdílet místo">${ms('add_location_alt')}</button>
+        <input id="msg" placeholder="Napiš zprávu partě…" autocomplete="off" maxlength="2000">
+        <button class="btn sm">Odeslat ${ms('arrow_upward', 'sm')}</button>
+      </form>
+      <p class="small muted composer-tip">Tip: špendlíkem sdílíš místo z plánu nebo z mapy a parta o něm může hlasovat.</p>
+    </div>`;
+  renderTripSummary(id);
+  const list = box.querySelector('#msgs');
+  const render = messageList(list, { group: true });
+  let lastId = 0; let first = true;
+  const bind = () => {
+    list.querySelectorAll('[data-vote]').forEach((b) => { b.onclick = async () => { tripCache = await ctx.api(`/trips/${id}/items/${b.dataset.vote}/vote`, { method: 'POST' }); rerenderCards(); }; });
+    list.querySelectorAll('[data-add-place]').forEach((b) => {
+      b.onclick = async () => {
+        const msg = all.find((m) => String(m.id) === b.dataset.addPlace);
+        const d = msg.data;
+        try {
+          tripCache = await ctx.api(`/trips/${id}/items`, { method: 'POST', body: { kind: 'note', data: { title: d.title, note: d.subtitle || '', category: 'sight', lat: d.lat, lng: d.lng, image: d.image } } });
+          const added = tripCache.items.at(-1); d.itemId = added.id;
+          ctx.toast('Přidáno do nápadů party'); rerenderCards();
+        } catch (err) { ctx.toast(err.message); }
+      };
+    });
+  };
+  const all = [];
+  const rerenderCards = () => {
+    list.querySelectorAll('.place-card').forEach((el) => {
+      const m = all.find((x) => String(x.id) === el.dataset.msg);
+      if (m) el.outerHTML = placeCard(m);
+    });
+    bind();
+  };
+  const load = async () => {
+    if (!document.body.contains(list)) return;
+    try {
+      const r = await ctx.api(`/trips/${id}/chat?after=${lastId}`);
+      if (first) { list.innerHTML = r.messages.length ? '' : '<p class="muted small center empty-line">Zatím žádné zprávy. Napiš partě, co plánuješ.</p>'; first = false; }
+      if (r.messages.length) {
+        list.querySelector('p.center')?.remove();
+        const fresh = r.messages.filter((m) => !all.some((x) => x.id === m.id));
+        all.push(...fresh);
+        const stick = list.scrollHeight - list.scrollTop - list.clientHeight < 120;
+        list.insertAdjacentHTML('beforeend', render(fresh));
+        lastId = r.messages.at(-1).id;
+        if (stick || fresh.length) list.scrollTop = list.scrollHeight;
+        bind(); refreshBadge();
+      }
+    } catch { /* offline */ }
+    chatTimer = setTimeout(load, document.hidden ? 30000 : 4000);
+  };
+  await load();
+  const send = async (body) => {
+    const { message } = await ctx.api(`/trips/${id}/chat`, { method: 'POST', body });
+    list.querySelector('p.center')?.remove();
+    all.push(message);
+    list.insertAdjacentHTML('beforeend', render([message])); lastId = Math.max(lastId, message.id);
+    list.scrollTop = list.scrollHeight; bind();
+  };
+  const input = box.querySelector('#msg');
+  box.querySelector('#composer').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const body = input.value.trim(); if (!body) return;
+    input.value = '';
+    try { await send({ body }); } catch (err) { ctx.toast(err.message); input.value = body; }
+  });
+  box.querySelector('#share-place').onclick = () => {
+    const items = (tripCache?.items || []).filter((i) => i.kind === 'note' || i.kind === 'lodging');
+    ctx.modal(`<h2>Sdílet místo</h2><p class="muted" style="margin-top:6px">Vyber místo z plánu, nebo najdi nové. Parta o něm může hlasovat.</p>
+      <div class="ac-wrap" style="margin-top:16px"><label for="sp-q">Najít místo</label><input id="sp-q" placeholder="Kavárna, vyhlídka, adresa…"></div>
+      ${items.length ? `<div class="pick-list">${items.map((i) => `<button class="pick" data-item="${i.id}">${ms('location_on')}<span class="grow"><b>${e(i.data.title || '')}</b><small>${e(i.data.place || i.data.note || i.data.subtitle || '')}</small></span>${ms('send', 'sm')}</button>`).join('')}</div>` : ''}`, (m, close) => {
+      m.querySelectorAll('[data-item]').forEach((b) => {
+        b.onclick = () => {
+          const it = items.find((x) => String(x.id) === b.dataset.item);
+          close();
+          send({ data: { type: 'place', title: it.data.title, subtitle: it.data.place || it.data.note || it.data.subtitle || '', image: it.data.image || null, lat: it.data.lat ?? it.data.location?.lat, lng: it.data.lng ?? it.data.location?.lng, itemId: it.id } }).catch((err) => ctx.toast(err.message));
+        };
+      });
+      autocomplete(m.querySelector('#sp-q'), {
+        onSelect: (r) => { close(); send({ data: { type: 'place', title: r.name, subtitle: r.detail || '', lat: r.lat, lng: r.lng } }).catch((err) => ctx.toast(err.message)); },
+      });
+    });
+  };
+  if (window.innerWidth >= 900) input.focus();
+}
+
+function renderTripSummary(id) {
+  const box = document.getElementById('trip-summary');
+  if (!box || !tripCache) return;
+  const { trip, items, total } = tripCache;
+  const persons = Number(trip.persons) || 1;
+  const ideas = items.filter((i) => i.kind === 'note' && !i.data.day).length;
+  const pct = trip.budget ? Math.min(100, Math.round((total / trip.budget) * 100)) : 0;
+  box.hidden = false;
+  box.innerHTML = `<div class="card-head"><h3>${ms('donut_small', 'sm')} Souhrn výletu</h3></div>
+    <p class="small muted">${items.filter((i) => i.kind !== 'destination').length} položek v plánu • ${ideas} ${ideas === 1 ? 'nápad čeká' : 'nápadů čeká'} na hlasování.</p>
+    <div class="soft-box"><div class="row-between"><span class="small muted">Rozpočet na osobu</span><b class="num">${ctx.czk(total / persons)}</b></div>
+      ${trip.budget ? `<div class="progress"><i style="width:${pct}%"></i></div>` : ''}</div>
+    <a class="btn soft wide" href="#/trips/${id}">${ms('calculate', 'sm')} Otevřít plán a rozpočet</a>`;
 }
 
 async function mountConversation(box, id, friend) {
   const e = ctx.esc;
-  if (!friend) { box.innerHTML = '<div class="empty"><div class="big">🔒</div><p>Psát si můžeš jen s přáteli.</p></div>'; return; }
+  if (!friend) { box.innerHTML = `<div class="empty"><div class="big">${ms('lock')}</div><p>Psát si můžeš jen s přáteli.</p></div>`; return; }
   box.innerHTML = `
-    <header class="chat-head"><a class="btn ghost sm back" href="#/chat" aria-label="Zpět">‹</a><span class="avatar ${['', 'sky', 'gold', 'lav'][id % 4]}">${e(ctx.initials(friend.name))}</span><b class="grow">${e(friend.name)}</b>
+    <header class="chat-head"><a class="icon-btn back" href="#/chat" aria-label="Zpět">${ms('arrow_back')}</a><span class="conv-ic">${e(ctx.initials(friend.name))}</span>
+      <div class="grow"><b class="ellipsis">${e(friend.name)}</b><small class="muted ellipsis">${e(friend.email || '')}</small></div>
       <button class="btn ghost sm" id="unfriend" title="Odebrat z přátel">Odebrat</button></header>
     <div class="msgs" id="msgs"><div class="skeleton" style="height:60px"></div></div>
-    <form class="composer" id="composer"><input id="msg" placeholder="Napiš zprávu…" autocomplete="off" maxlength="2000"><button class="btn" aria-label="Odeslat">➤</button></form>`;
+    <div class="composer-wrap"><form class="composer" id="composer"><input id="msg" placeholder="Napiš zprávu…" autocomplete="off" maxlength="2000"><button class="btn sm">Odeslat ${ms('arrow_upward', 'sm')}</button></form></div>`;
   const list = box.querySelector('#msgs');
+  const render = messageList(list, { group: false });
   let lastId = 0; let first = true;
-  const bubble = (m) => `<div class="msg${m.mine ? ' mine' : ''}" data-id="${m.id}"><span>${e(m.body).replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>')}</span><time>${timeLabel(m.at)}</time></div>`;
   const load = async () => {
     if (!document.body.contains(list)) return;
     try {
       const r = await ctx.api(`/chat/${id}?after=${lastId}`);
-      if (first) { list.innerHTML = r.messages.length ? '' : '<p class="muted small center">Zatím žádné zprávy. Pozdrav! 👋</p>'; first = false; }
+      if (first) { list.innerHTML = r.messages.length ? '' : '<p class="muted small center empty-line">Zatím žádné zprávy. Pozdrav!</p>'; first = false; }
       if (r.messages.length) {
         list.querySelector('p.center')?.remove();
-        const stick = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
-        list.insertAdjacentHTML('beforeend', r.messages.filter((m) => !list.querySelector(`[data-id="${m.id}"]`)).map(bubble).join(''));
+        const fresh = r.messages.filter((m) => !list.querySelector(`[data-id="${m.id}"]`));
+        list.insertAdjacentHTML('beforeend', render(fresh));
         lastId = r.messages.at(-1).id;
-        if (stick || lastId) list.scrollTop = list.scrollHeight;
+        list.scrollTop = list.scrollHeight;
         refreshBadge();
       }
     } catch { /* offline */ }
@@ -264,7 +448,7 @@ async function mountConversation(box, id, friend) {
     try {
       const { message } = await ctx.api(`/chat/${id}`, { method: 'POST', body: { body } });
       list.querySelector('p.center')?.remove();
-      list.insertAdjacentHTML('beforeend', bubble(message)); lastId = Math.max(lastId, message.id);
+      list.insertAdjacentHTML('beforeend', render([message])); lastId = Math.max(lastId, message.id);
       list.scrollTop = list.scrollHeight;
     } catch (err) { ctx.toast(err.message); input.value = body; }
   });
@@ -283,13 +467,13 @@ function addFriendModal() {
       <div class="error" id="af-err"></div><button class="btn">Poslat žádost</button></form>
     <div class="divider"><span>nebo</span></div>
     <p class="small muted">Nemá ještě účet? Pošli mu pozvánku. Po registraci ji jedním klikem přijme.</p>
-    <button class="btn sky" id="af-link" style="margin-top:8px">🔗 Vytvořit pozvánku</button>
+    <button class="btn sky" id="af-link" style="margin-top:8px">${ms('link')} Vytvořit pozvánku</button>
     <div id="af-out"></div>`, (m, close) => {
     m.querySelector('#af').addEventListener('submit', async (ev) => {
       ev.preventDefault();
       try {
         const r = await ctx.api('/friends', { method: 'POST', body: { email: m.querySelector('#af-email').value } });
-        ctx.toast(r.status === 'accepted' ? `Teď jste s ${r.user.name} přátelé 🎉` : `Žádost odeslána – čeká na ${r.user.name}`);
+        ctx.toast(r.status === 'accepted' ? `Teď jste s ${r.user.name} přátelé` : `Žádost odeslána – čeká na ${r.user.name}`);
         close(); viewChat();
       } catch (err) { m.querySelector('#af-err').textContent = err.message; }
     });
@@ -297,7 +481,7 @@ function addFriendModal() {
       const { token } = await ctx.api('/friends/invite-link', { method: 'POST' });
       const url = `${location.origin}/#/invite/${token}`;
       m.querySelector('#af-out').innerHTML = `<div class="copy-row"><input readonly value="${ctx.esc(url)}"><button class="btn sm" id="af-copy">Sdílet</button></div>`;
-      m.querySelector('#af-copy').onclick = () => ctx.shareLink('Pojď se mnou plánovat výlety v TripFinderu', url);
+      m.querySelector('#af-copy').onclick = () => ctx.shareLink('Pojď se mnou plánovat výlety ve Wanderly', url);
     };
   });
 }
@@ -305,10 +489,10 @@ function addFriendModal() {
 export async function viewInvite(token) {
   const e = ctx.esc;
   let inv;
-  try { inv = await ctx.api(`/friends/invite/${token}`); } catch (err) { ctx.$app.innerHTML = ctx.emptyState('🔗', err.message, '<a class="btn" href="#/">Domů</a>'); return; }
+  try { inv = await ctx.api(`/friends/invite/${token}`); } catch (err) { ctx.$app.innerHTML = ctx.emptyState('link', err.message, '<a class="btn" href="#/">Domů</a>'); return; }
   const name = inv.inviter.name;
   ctx.$app.innerHTML = `<div class="glass-card auth center">
-      <div class="big-emoji">🤝</div>
+      <div class="big-emoji">${ms('handshake')}</div>
       <h1>${e(name)} tě zve mezi přátele</h1>
       <p class="muted" style="margin:8px 0 18px">Jako přátelé si můžete psát a plánovat společné výlety.</p>
       ${inv.self ? '<p class="muted">Tohle je tvoje pozvánka – pošli ji kamarádovi.</p>'
@@ -320,7 +504,7 @@ export async function viewInvite(token) {
   const acc = document.getElementById('acc');
   if (acc) acc.onclick = async () => {
     const r = await ctx.api(`/friends/invite/${token}/accept`, { method: 'POST' });
-    ctx.toast(`Teď jste s ${name} přátelé 🎉`);
+    ctx.toast(`Teď jste s ${name} přátelé`);
     location.hash = `#/chat/${r.friendId}`;
   };
 }

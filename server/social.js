@@ -3,6 +3,7 @@ import express from 'express';
 import { randomBytes } from 'node:crypto';
 import { countries } from 'countries-list';
 import { requireUser } from './auth.js';
+import { tripUnread } from './planner.js';
 
 export const SOCIAL_SCHEMA = `
   CREATE TABLE IF NOT EXISTS friendships (
@@ -216,11 +217,12 @@ export function socialRouter(db) {
   r.get('/notifications', async (req, res) => {
     if (!req.user) return res.json({ unread: 0, requests: 0 });
     const me = req.user.id;
-    const [u, f] = await Promise.all([
+    const [u, f, t] = await Promise.all([
       db.get('SELECT COUNT(*) AS n FROM messages WHERE recipient_id = ? AND read_at IS NULL', me),
       db.get("SELECT COUNT(*) AS n FROM friendships WHERE addressee_id = ? AND status = 'pending'", me),
+      tripUnread(db, me),
     ]);
-    res.json({ unread: Number(u.n), requests: Number(f.n) });
+    res.json({ unread: Number(u.n) + t, direct: Number(u.n), trips: t, requests: Number(f.n) });
   });
 
   return r;

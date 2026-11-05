@@ -1,6 +1,6 @@
 // Service worker: aplikace (HTML/CSS/JS) funguje offline, API jde vždy na síť
 // a při výpadku vrací poslední uloženou odpověď (např. seznam výletů).
-const VERSION = 'tf-v7';
+const VERSION = 'tf-v8';
 const SHELL = ['/', '/index.html', '/styles.css', '/app.js', '/widgets.js', '/manifest.webmanifest', '/icons/icon.svg', '/icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {
