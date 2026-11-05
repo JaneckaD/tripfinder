@@ -39,7 +39,9 @@ export function popover(anchor, html, { className = '', onClose } = {}) {
 }
 
 // ---------- Našeptávač míst ----------
-const KIND_ICON = { catalog: null, city: '🏙️', address: '🏠', place: '📍', airport: '✈️', recent: '🕘' };
+const KIND_ICON = { catalog: 'location_on', city: 'location_city', address: 'home', place: 'location_on', airport: 'flight', recent: 'history', me: 'my_location' };
+// Obrysová ikona (Material Symbols Outlined)
+export const ms = (name, cls = '') => `<span class="ms${cls ? ` ${cls}` : ''}" aria-hidden="true">${name}</span>`;
 export const POPULAR_ORIGINS = [
   { id: 'PRG', name: 'Praha', detail: 'Letiště Václava Havla', airport: 'PRG', kind: 'airport' },
   { id: 'BRQ', name: 'Brno', detail: 'Letiště Brno-Tuřany', airport: 'BRQ', kind: 'airport' },
@@ -70,7 +72,7 @@ export function autocomplete(input, { onSelect, suggestions = () => [], minChars
     if (!results.length && !note) { list.hidden = true; return; }
     list.innerHTML = results.map((r, i) => `
       <button type="button" class="ac-item${i === active ? ' active' : ''}" data-i="${i}" role="option">
-        <span class="ac-ico">${r.emoji || KIND_ICON[r.kind] || '📍'}</span>
+        <span class="ac-ico">${ms(r.icon || KIND_ICON[r.kind] || 'location_on')}</span>
         <span class="ac-text"><b>${esc(r.name)}</b><small>${esc(r.detail || '')}</small></span>
         ${r.airport ? `<span class="ac-code">${esc(r.airport)}</span>` : ''}
       </button>`).join('') + (note ? `<div class="ac-note">${note}</div>` : '');
@@ -234,11 +236,11 @@ export function loadLeaflet() {
 }
 
 export const MODE_STYLE = {
-  flight: { color: '#ff5a5f', dash: '2 9', weight: 3, icon: '✈️', label: 'Let' },
-  train: { color: '#007aff', dash: null, weight: 4, icon: '🚆', label: 'Vlak' },
-  bus: { color: '#34c759', dash: '10 7', weight: 4, icon: '🚌', label: 'Autobus' },
-  car: { color: '#5856d6', dash: null, weight: 4, icon: '🚗', label: 'Autem' },
-  walk: { color: '#af52de', dash: '1 7', weight: 4, icon: '🥾', label: 'Pěšky' },
+  flight: { color: '#111111', dash: '2 9', weight: 3, icon: 'flight', label: 'Let' },
+  train: { color: '#111111', dash: null, weight: 4, icon: 'train', label: 'Vlak' },
+  bus: { color: '#3a3a3c', dash: '10 7', weight: 4, icon: 'directions_bus', label: 'Autobus' },
+  car: { color: '#3a3a3c', dash: null, weight: 4, icon: 'directions_car', label: 'Autem' },
+  walk: { color: '#6e6e73', dash: '1 7', weight: 4, icon: 'directions_walk', label: 'Pěšky' },
 };
 
 // Zakřivený oblouk (pro lety) – kvadratická Bézierova křivka.
@@ -271,7 +273,7 @@ export function baseTiles(L, map, { withLayers = false, extraAttr = '' } = {}) {
   if (withLayers) {
     const topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { subdomains: 'abc', maxZoom: 17, attribution: `${OSM_ATTR}, &copy; <a href="https://opentopomap.org">OpenTopoMap</a>${extraAttr}` });
     const sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: `&copy; Esri, Maxar${extraAttr}` });
-    L.control.layers({ '🗺️ Mapa': osm, '⛰️ Turistická': topo, '🛰️ Satelit': sat }, null, { position: 'bottomleft' }).addTo(map);
+    L.control.layers({ Mapa: osm, Turistická: topo, Satelit: sat }, null, { position: 'bottomleft' }).addTo(map);
   }
   return osm;
 }
@@ -285,7 +287,7 @@ export function twoFingerHint(el) {
   el.classList.add('two-finger');
   const hint = document.createElement('div');
   hint.className = 'map-hint';
-  hint.innerHTML = '<span>✌️ Mapu posuneš dvěma prsty</span>';
+  hint.innerHTML = '<span>Mapu posuneš dvěma prsty</span>';
   el.appendChild(hint);
   let timer = 0; let start = null;
   el.addEventListener('touchstart', (e) => { start = e.touches.length === 1 ? e.touches[0] : null; if (e.touches.length > 1) el.classList.remove('hint-on'); }, { passive: true });
@@ -316,16 +318,16 @@ export async function drawMap(el, { points = [], segments = [], legend = true } 
     const line = s.path?.length > 1 ? s.path : s.mode === 'flight' ? arc(s.from, s.to) : [s.from, s.to];
     L.polyline(line, { color: '#fff', weight: st.weight + 4, opacity: 0.85 }).addTo(map);
     const pl = L.polyline(line, { color: st.color, weight: st.weight, dashArray: st.dash, lineCap: 'round' }).addTo(map);
-    if (s.label) pl.bindTooltip(`${st.icon} ${esc(s.label)}`, { sticky: true });
+    if (s.label) pl.bindTooltip(`${esc(s.label)}`, { sticky: true });
     const mid = line[Math.floor(line.length / 2)];
-    L.marker(mid, { icon: L.divIcon({ className: 'map-mode', html: `<span style="--c:${st.color}">${st.icon}</span>`, iconSize: [26, 26], iconAnchor: [13, 13] }), interactive: false }).addTo(map);
+    L.marker(mid, { icon: L.divIcon({ className: 'map-mode', html: `<span style="--c:${st.color}">${ms(st.icon)}</span>`, iconSize: [26, 26], iconAnchor: [13, 13] }), interactive: false }).addTo(map);
     bounds.push(...line);
   }
   for (const p of points) {
     if (!Number.isFinite(p.lat)) continue;
     const html = p.kind === 'stay'
-      ? `<span class="pin-stay" style="--c:${p.color || '#007aff'}">🛏️</span>`
-      : `<span class="pin" style="--c:${p.color || '#ff5a5f'}">${p.num ?? (p.kind === 'origin' ? '🏠' : '📍')}</span>`;
+      ? `<span class="pin-stay" style="--c:${p.color || '#3a3a3c'}">${ms('bed')}</span>`
+      : `<span class="pin" style="--c:${p.color || '#111111'}">${p.num ?? ms(p.kind === 'origin' ? 'home' : 'location_on')}</span>`;
     const size = p.kind === 'stay' ? 26 : 32;
     L.marker([p.lat, p.lng], { icon: L.divIcon({ className: 'map-pin', html, iconSize: [size, size], iconAnchor: [size / 2, size / 2] }), zIndexOffset: p.kind === 'stay' ? 0 : 500 })
       .addTo(map).bindPopup(`<b>${esc(p.label)}</b>${p.sub ? `<br><span>${esc(p.sub)}</span>` : ''}`);
@@ -361,7 +363,7 @@ export const MOTIFS = {
   PL: '🥟', IE: '☘️', SK: '🏔️', DK: '🚲', SE: '👑', FI: '🦌', BE: '🧇', TR: '🧿', MT: '⚓', KR: '🥢', SG: '🦁', JO: '🐪', GE: '🍇',
   CR: '🦥', CO: '☕', CN: '🐼', IN: '🕌', SI: '🏞️', BG: '🌹', RO: '🧛', RS: '🎺', ME: '⛰️', CY: '☀️', LU: '🏰', SC: '🐢', MU: '🐬', PH: '🥭',
 };
-const INKS = ['#e8474d', '#007aff', '#1d8a3a', '#a35d00', '#8a2fb8', '#0f5257', '#c2185b', '#3949ab'];
+const INKS = ['#111111', '#3a3a3c', '#48484a', '#1d1d1f', '#636366', '#2c2c2e', '#545456', '#3a3a3c'];
 const SHAPES = ['rect', 'circle', 'octagon', 'ticket', 'hexagon', 'oval'];
 const hash = (s) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
 

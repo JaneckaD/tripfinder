@@ -1,6 +1,8 @@
-# TripFinder 🌍
+# Wanderly (TripFinder)
 
-PWA pro hledání a plánování výletů po celém světě: destinace podle kontinentu a filtrů, doprava a ubytování od více poskytovatelů s porovnáním cen, účty, ukládání více výletů, spolucestující a sdílení odkazem.
+PWA pro plánování výletů s přáteli: společný program po dnech, nápady party s hlasováním, rozpočet, skupinový chat výletu, pozvánka odkazem, mapa míst (hidden gems, trendy) a vyhledání dopravy a ubytování s porovnáním cen.
+
+Vzhled „Monochrome Bento Travel“: černobílý, font Plus Jakarta Sans a obrysové ikony Material Symbols. Server do `index.html` sám doplní seznam použitých ikon (`server/icons.js`), takže se stahují jen potřebné glyfy. Ikonu v kódu piš jako `ms('nazev')`.
 
 ## Nasazení na internet
 
