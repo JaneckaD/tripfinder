@@ -65,6 +65,9 @@ Proměnné prostředí:
 - **Ubytování ve výletu** – hledání na Airbnb s fotkami, odkaz na Booking.com s vyplněným termínem (Booking nemá veřejné API) a vlastní ubytování s nahranými fotkami a volbou náhledového obrázku.
 - **Platby** – u každé položky cena (celkem, nebo za osobu – systém ji rozpočítá), termín splatnosti a kdo se na ní podílí; každý vidí, kolik a za co ještě doplácí, a svůj podíl si odškrtne. Organizátor odškrtává i za ostatní.
 - **Fotky** – profilová fotka, náhledový obrázek výletu a fotky ubytování a jízdenek se zmenší v prohlížeči a uloží do databáze (tabulka `trip_files`, sloupec `users.avatar`).
+- **Živé změny** – zprávy, odpovědi na ankety a úpravy výletu se ostatním ukážou hned (Server-Sent Events `/api/events`, polling jen jako záloha).
+- **Vlastní kalendář** – výběr data bez systémového okna; nejde vybrat den v minulosti ani konec před začátkem.
+- **Vlajky** – SVG vlajky (balíček `flag-icons`) u zemí, pasů a jazyků, fungují i ve Windows.
 - **Spolucestující** – pozvání e-mailem s rolí „upravuje“ nebo „jen čte“. Kdo ještě nemá účet, uvidí výlet hned po registraci.
 - **Sdílení** – veřejný odkaz jen pro čtení, jde kdykoli zrušit.
 - **PWA** – instalovatelná na mobil i desktop, offline režim pro aplikaci a naposledy načtená data.

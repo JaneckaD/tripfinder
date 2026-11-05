@@ -1,10 +1,12 @@
 // Profil cestovatele (úvodní dotazník + úpravy), přátelé, pozvánky a chat.
-import { autocomplete, ms } from './widgets.js';
+import { autocomplete, ms, popover, closePopover } from './widgets.js';
 
 let ctx; // { api, esc, toast, state, $app, initials, requireLogin, emptyState, route }
 export function setupSocial(c) { ctx = c; }
 
-const flag = (cc) => (cc ? String(cc).toUpperCase() : '');
+// Vlajky jako SVG obrázky (fungují všude, i ve Windows, kde emoji vlajky chybí)
+export const flag = (cc) => (/^[a-z]{2}$/i.test(cc || '') ? `<img class="flag" src="/vendor/flags/${cc.toLowerCase()}.svg" alt="" width="20" height="15" loading="lazy" onerror="this.style.visibility='hidden'">` : '');
+const LANG_CC = { cs: 'cz', sk: 'sk', en: 'gb', de: 'de', fr: 'fr', es: 'es', it: 'it', pt: 'pt', pl: 'pl', hu: 'hu', ru: 'ru', uk: 'ua', nl: 'nl', sv: 'se', no: 'no', da: 'dk', fi: 'fi', el: 'gr', tr: 'tr', hr: 'hr', sl: 'si', sr: 'rs', ro: 'ro', bg: 'bg', ar: 'sa', he: 'il', zh: 'cn', ja: 'jp', ko: 'kr', th: 'th', vi: 'vn', id: 'id', hi: 'in' };
 const langName = (() => { const dn = new Intl.DisplayNames(['cs'], { type: 'language' }); return (c) => { try { return dn.of(c); } catch { return c; } }; })();
 const LANGS = ['cs', 'sk', 'en', 'de', 'fr', 'es', 'it', 'pt', 'pl', 'hu', 'ru', 'uk', 'nl', 'sv', 'no', 'da', 'fi', 'el', 'tr', 'hr', 'sl', 'sr', 'ro', 'bg', 'ar', 'he', 'zh', 'ja', 'ko', 'th', 'vi', 'id', 'hi'];
 const EU = new Set('AT BE BG HR CY CZ DK EE FI FR DE GR HU IE IT LV LT LU MT NL PL PT RO SK SI ES SE IS LI NO CH'.split(' '));
@@ -54,13 +56,36 @@ export function profileHints(dest, langCodes = []) {
 }
 
 // ---------- Formulářové prvky ----------
-function countrySelect(id, value, list, placeholder = 'Vyber zemi') {
-  return `<select id="${id}"><option value="">${placeholder}</option>${list.map((c) => `<option value="${c.cc}"${c.cc === value ? ' selected' : ''}>${flag(c.cc)} ${ctx.esc(c.name)}</option>`).join('')}</select>`;
+const normTxt = (s) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+// Výběr státu s vlajkami a hledáním (systémový <select> neumí obrázky)
+function openCountryList(anchor, list, onPick, exclude = []) {
+  const el = popover(anchor, `<input class="cp-q" placeholder="Hledat stát…" aria-label="Hledat stát" autocomplete="off"><div class="cp-list" role="listbox"></div>`, { className: 'cp-pop' });
+  const box = el.querySelector('.cp-list'); const q = el.querySelector('.cp-q');
+  const draw = () => {
+    const nq = normTxt(q.value.trim());
+    const rows = list.filter((c) => !exclude.includes(c.cc) && (!nq || normTxt(c.name).includes(nq) || c.cc.toLowerCase() === nq));
+    box.innerHTML = rows.slice(0, 250).map((c) => `<button type="button" class="cp-row" data-cc="${c.cc}" role="option">${flag(c.cc)}<span>${ctx.esc(c.name)}</span></button>`).join('') || '<p class="small muted" style="padding:8px">Nic jsme nenašli.</p>';
+  };
+  q.addEventListener('input', draw);
+  box.addEventListener('click', (e) => { const b = e.target.closest('[data-cc]'); if (b) { closePopover(); onPick(b.dataset.cc); } });
+  q.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); box.querySelector('[data-cc]')?.click(); } });
+  draw();
+  if (window.innerWidth >= 640) q.focus();
+}
+function countryButton(id, value, list, placeholder = 'Vyber zemi') {
+  const c = list.find((x) => x.cc === value);
+  return `<button type="button" class="cpick${c ? '' : ' empty'}" id="${id}" data-value="${value || ''}">${c ? `${flag(c.cc)}<span>${ctx.esc(c.name)}</span>` : `${ms('public', 'sm')}<span>${placeholder}</span>`}${ms('expand_more', 'sm')}</button>`;
+}
+function bindCountryButton(btn, list) {
+  btn.addEventListener('click', () => openCountryList(btn, list, (cc) => {
+    btn.outerHTML = countryButton(btn.id, cc, list);
+    bindCountryButton(document.getElementById(btn.id), list);
+  }));
 }
 function chipPicker(el, { options, selected, label }) {
   const sel = new Set(selected);
   const draw = () => {
-    el.innerHTML = options.map(([v, l]) => `<button type="button" class="chip" data-v="${v}" aria-pressed="${sel.has(v)}">${l}</button>`).join('');
+    el.innerHTML = options.map(([v, l, pre = '']) => `<button type="button" class="chip" data-v="${v}" aria-pressed="${sel.has(v)}">${pre}${l}</button>`).join('');
   };
   el.addEventListener('click', (e) => {
     const b = e.target.closest('[data-v]'); if (!b) return;
@@ -75,8 +100,8 @@ function passportPicker(el, list, selected) {
   const sel = [...selected];
   const draw = () => {
     el.innerHTML = `${sel.map((cc) => `<span class="chip" aria-pressed="true">${flag(cc)} ${ctx.esc(list.find((c) => c.cc === cc)?.name || cc)} <button type="button" class="x" data-rm="${cc}" aria-label="Odebrat">×</button></span>`).join('')}
-      ${sel.length < 4 ? countrySelect('pp-add', '', list, sel.length ? '+ Další pas' : 'Vyber stát pasu') : ''}`;
-    el.querySelector('#pp-add')?.addEventListener('change', (e) => { if (e.target.value && !sel.includes(e.target.value)) sel.push(e.target.value); draw(); });
+      ${sel.length < 4 ? `<button type="button" class="chip add-chip" id="pp-add">${ms('add', 'sm')} ${sel.length ? 'Další pas' : 'Vyber stát pasu'}</button>` : ''}`;
+    el.querySelector('#pp-add')?.addEventListener('click', (e) => openCountryList(e.currentTarget, list, (cc) => { if (!sel.includes(cc)) sel.push(cc); draw(); }, sel));
   };
   el.addEventListener('click', (e) => { const b = e.target.closest('[data-rm]'); if (b) { sel.splice(sel.indexOf(b.dataset.rm), 1); draw(); } });
   draw();
@@ -93,19 +118,20 @@ function profileFields(p, list) {
   const e = ctx.esc;
   return `
     <div class="two">
-      <div><label for="pf-home-cc">Země, kde žiješ</label>${countrySelect('pf-home-cc', p.homeCc, list)}</div>
+      <div><label for="pf-home-cc">Země, kde žiješ</label>${countryButton('pf-home-cc', p.homeCc, list)}</div>
       <div class="ac-wrap"><label for="pf-home">Domovské město (odtud budeme hledat spoje)</label><input id="pf-home" placeholder="např. Brno" autocomplete="off"></div>
     </div>
     <div><label>Národnost – jaký máš pas</label><div class="chips wrap" id="pf-pass"></div></div>
     <div class="two">
-      <div><label for="pf-birth">Datum narození <span class="muted small">(kvůli slevám pro mladé a seniory)</span></label><input id="pf-birth" type="date" max="${new Date().toISOString().slice(0, 10)}" value="${e(p.birthDate)}"></div>
+      <div><label for="pf-birth">Datum narození <span class="muted small">(kvůli slevám pro mladé a seniory)</span></label><input id="pf-birth" type="date" data-past max="${new Date().toISOString().slice(0, 10)}" value="${e(p.birthDate)}"></div>
       <div class="age-out" id="pf-age"></div>
     </div>
     <div><label>Jakými jazyky mluvíš</label><div class="chips wrap" id="pf-langs"></div></div>`;
 }
 function mountProfileFields(root, p, list) {
   const getPass = passportPicker(root.querySelector('#pf-pass'), list, p.passports.length ? p.passports : (p.homeCc ? [p.homeCc] : []));
-  const getLangs = chipPicker(root.querySelector('#pf-langs'), { options: LANGS.map((l) => [l, langName(l)]), selected: p.languages.length ? p.languages : ['cs'], label: 'Jazyky' });
+  bindCountryButton(root.querySelector('#pf-home-cc'), list);
+  const getLangs = chipPicker(root.querySelector('#pf-langs'), { options: LANGS.map((l) => [l, langName(l), `${flag(LANG_CC[l])} `]), selected: p.languages.length ? p.languages : ['cs'], label: 'Jazyky' });
   const getHome = homePicker(root.querySelector('#pf-home'), p);
   const birth = root.querySelector('#pf-birth'); const ageOut = root.querySelector('#pf-age');
   const showAge = () => {
@@ -115,7 +141,7 @@ function mountProfileFields(root, p, list) {
   birth.addEventListener('change', showAge); showAge();
   return () => {
     const home = getHome();
-    return { homeCc: root.querySelector('#pf-home-cc').value, homePlace: home.id, homePlaceName: home.name, passports: getPass(), birthDate: birth.value, languages: getLangs() };
+    return { homeCc: root.querySelector('#pf-home-cc').dataset.value, homePlace: home.id, homePlaceName: home.name, passports: getPass(), birthDate: birth.value, languages: getLangs() };
   };
 }
 async function saveProfile(body) {
@@ -209,9 +235,13 @@ const dayStamp = (iso) => {
 const daysTo = (start) => (start ? Math.ceil((new Date(start) - new Date(new Date().toDateString())) / 86400000) : null);
 const linkify = (html) => html.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
 let chatTimer;
+// Živé změny ze serveru (SSE): otevřená konverzace se načte hned, polling je jen záloha.
+let liveHandler = null;
+window.addEventListener('tf:live', (ev) => liveHandler?.(ev.detail));
+const pollDelay = () => (document.hidden ? 30000 : ctx.state.live ? 20000 : 4000);
 
 export async function viewChat(friendId, tripId) {
-  clearTimeout(chatTimer);
+  clearTimeout(chatTimer); liveHandler = null;
   if (!ctx.requireLogin()) return;
   const e = ctx.esc;
   const [data, conv] = await Promise.all([ctx.api('/friends'), ctx.api('/conversations')]);
@@ -280,6 +310,12 @@ function messageList(list, { group }) {
   }).join('');
 }
 
+// Zpráva se ukáže hned po odeslání (šedě), než ji potvrdí server.
+function pendingBubble(list, body) {
+  list.insertAdjacentHTML('beforeend', `<div class="msg mine pending"><div class="msg-col"><span class="bubble">${ctx.esc(body)}</span></div></div>`);
+  list.scrollTop = list.scrollHeight;
+  return list.lastElementChild;
+}
 let tripCache = null;
 let chatAnswers = {};
 const me = () => ctx.state.user?.id;
@@ -492,12 +528,18 @@ async function mountTripChat(box, id, conv) {
         bind(); refreshBadge();
       }
     } catch { /* offline */ }
-    chatTimer = setTimeout(load, document.hidden ? 30000 : 4000);
+    chatTimer = setTimeout(load, pollDelay());
   };
   await load();
+  liveHandler = async (d) => {
+    if (!document.body.contains(list) || d.tripId !== id) return;
+    if (d.type === 'chat') { clearTimeout(chatTimer); load(); return; }
+    if (d.type === 'trip') { const t = await ctx.api(`/trips/${id}`).catch(() => null); if (t) { tripCache = t; rerenderCards(); renderTripSummary(id); } }
+  };
   const send = async (body) => {
     const { message } = await ctx.api(`/trips/${id}/chat`, { method: 'POST', body });
     list.querySelector('p.center')?.remove();
+    if (all.some((x) => x.id === message.id)) return;
     all.push(message);
     list.insertAdjacentHTML('beforeend', render([message])); lastId = Math.max(lastId, message.id);
     list.scrollTop = list.scrollHeight; bind();
@@ -507,7 +549,8 @@ async function mountTripChat(box, id, conv) {
     ev.preventDefault();
     const body = input.value.trim(); if (!body) return;
     input.value = '';
-    try { await send({ body }); } catch (err) { ctx.toast(err.message); input.value = body; }
+    const temp = pendingBubble(list, body);
+    try { await send({ body }); temp.remove(); } catch (err) { temp.remove(); ctx.toast(err.message); input.value = body; }
   });
   const sharePlace = () => {
     const items = (tripCache?.items || []).filter((i) => i.kind === 'note' || i.kind === 'lodging');
@@ -656,20 +699,23 @@ async function mountConversation(box, id, friend) {
         refreshBadge();
       }
     } catch { /* offline */ }
-    chatTimer = setTimeout(load, document.hidden ? 30000 : 4000);
+    chatTimer = setTimeout(load, pollDelay());
   };
   await load();
+  liveHandler = (d) => { if (d.type === 'dm' && (d.from === id || d.to === id) && document.body.contains(list)) { clearTimeout(chatTimer); load(); } };
   const input = box.querySelector('#msg');
   box.querySelector('#composer').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const body = input.value.trim(); if (!body) return;
     input.value = '';
+    const temp = pendingBubble(list, body);
     try {
       const { message } = await ctx.api(`/chat/${id}`, { method: 'POST', body: { body } });
-      list.querySelector('p.center')?.remove();
-      list.insertAdjacentHTML('beforeend', render([message])); lastId = Math.max(lastId, message.id);
+      temp.remove(); list.querySelector('p.center')?.remove();
+      if (!list.querySelector(`[data-id="${message.id}"]`)) list.insertAdjacentHTML('beforeend', render([message]));
+      lastId = Math.max(lastId, message.id);
       list.scrollTop = list.scrollHeight;
-    } catch (err) { ctx.toast(err.message); input.value = body; }
+    } catch (err) { temp.remove(); ctx.toast(err.message); input.value = body; }
   });
   box.querySelector('#unfriend').onclick = async () => {
     if (!confirm(`Odebrat ${friend.name} z přátel?`)) return;

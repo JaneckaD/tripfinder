@@ -16,6 +16,7 @@ import { plannerRoutes } from './planner.js';
 import { indexHtml } from './icons.js';
 import { mediaRoutes } from './media.js';
 import compression from 'compression';
+import { liveMiddleware, liveRoutes } from './live.js';
 import { countries } from 'countries-list';
 
 const PUBLIC_DIR = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'public');
@@ -40,8 +41,10 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
   app.use(compression());
   app.use(express.json({ limit: '2mb' }));
   app.use(loadUser(db));
+  app.use(liveMiddleware(db));
 
   const api = express.Router();
+  liveRoutes(api);
   const bad = (res, msg, code = 400) => res.status(code).json({ error: msg });
 
   // ---------- Přihlášení ----------
@@ -399,6 +402,7 @@ export function createApp(db, { secureCookies = process.env.NODE_ENV === 'produc
   app.use('/vendor/maplibre', express.static(join(PUBLIC_DIR, '..', 'node_modules', 'maplibre-gl', 'dist'), { maxAge: '30d' }));
   app.use('/vendor/maplibre-leaflet', express.static(join(PUBLIC_DIR, '..', 'node_modules', '@maplibre', 'maplibre-gl-leaflet'), { maxAge: '30d' }));
   app.use('/vendor/leaflet', express.static(join(PUBLIC_DIR, '..', 'node_modules', 'leaflet', 'dist'), { maxAge: '30d' }));
+  app.use('/vendor/flags', express.static(join(PUBLIC_DIR, '..', 'node_modules', 'flag-icons', 'flags', '4x3'), { maxAge: '30d', immutable: true }));
   app.use(express.static(PUBLIC_DIR, {
     setHeaders(res, path) {
       if (path.endsWith('sw.js')) res.setHeader('Cache-Control', 'no-cache');

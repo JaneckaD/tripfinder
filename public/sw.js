@@ -1,6 +1,6 @@
 // Service worker: aplikace (HTML/CSS/JS) funguje offline, API jde vždy na síť
 // a při výpadku vrací poslední uloženou odpověď (např. seznam výletů).
-const VERSION = 'tf-v10';
+const VERSION = 'tf-v12';
 const SHELL = ['/', '/index.html', '/styles.css', '/app.js', '/widgets.js', '/manifest.webmanifest', '/icons/icon.svg', '/icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {
@@ -17,6 +17,8 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(request.url);
   if (request.method !== 'GET' || url.origin !== location.origin) return;
 
+  // Živé události a našeptávač vždy rovnou na síť (bez mezipaměti a zbytečného zdržení)
+  if (/^\/api\/(events|places)/.test(url.pathname)) return;
   if (url.pathname.startsWith('/api/')) {
     // Network-first pro data.
     e.respondWith(fetch(request).then((res) => {
