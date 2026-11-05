@@ -1458,3 +1458,109 @@ div.tl-card { cursor: default; }
 .pm small { line-height: 16px; }
 @media (max-width: 560px) { .modal .two.dt { grid-template-columns: 1fr; } }
 @media (max-width: 560px) { .tl-card.has-img { grid-template-columns: minmax(0, 1fr); } .tl-img { width: 100%; height: 140px; } }
+
+/* Patička: pozvánka k vytvoření výletu */
+.footer-cta { max-width: 1200px; margin: 0 auto; padding: 32px 16px 0; }
+@media (min-width: 768px) { .footer-cta { padding: 40px 24px 0; } }
+.site-footer .cta-band { margin-top: 0; padding: 32px 28px; }
+@media (min-width: 768px) { .site-footer .cta-band { padding: 44px 56px; } }
+.site-footer .footer-in { padding-top: 24px; }
+main { padding-bottom: 40px; }
+
+/* ---------- Chat: ankety, kalendář, dotazník, sdílení z plánu ---------- */
+.avatar.xs { width: 22px; height: 22px; font-size: 9px; border-width: 1.5px; }
+.mini-stack { display: inline-flex; padding-left: 6px; }
+.mini-stack .avatar { margin-left: -6px; border: 2px solid #fff; }
+.chat-card { margin-top: 6px; width: min(100%, 380px); border-radius: 20px; border: 1px solid var(--hairline); background: #fff; padding: 14px; display: grid; gap: 10px; box-shadow: 0 1px 2px rgba(0, 0, 0, .04); }
+.msg.mine .chat-card { margin-left: auto; }
+.cc-head { display: flex; align-items: flex-start; gap: 10px; }
+.cc-head .grow { display: grid; min-width: 0; }
+.cc-head small { font-size: 11px; line-height: 15px; color: var(--text-2); text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+.cc-head b { font-size: 15px; line-height: 20px; font-weight: 600; }
+.cc-ic { width: 34px; height: 34px; flex: none; border-radius: 11px; display: grid; place-items: center; background: var(--c, #111); color: #fff; }
+.cc-ic.sm { width: 28px; height: 28px; border-radius: 9px; }
+.cc-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.cc-foot.right { justify-content: flex-end; }
+.cc-foot:empty { display: none; }
+.link-btn { border: 0; background: none; padding: 0; font: inherit; font-size: 12px; color: var(--text-2); text-decoration: underline; cursor: pointer; }
+.poll-opts { display: grid; gap: 6px; }
+.poll-opt { position: relative; overflow: hidden; display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 14px; border: 1px solid var(--hairline-2); background: #fff; font: inherit; font-size: 14px; text-align: left; color: #111; cursor: pointer; }
+.poll-opt > * { position: relative; }
+.poll-opt > i { position: absolute; inset: 0 auto 0 0; background: var(--fill); transition: width .3s; }
+.poll-opt.on { border-color: #111; }
+.poll-opt.on > i { background: #ececf0; }
+.poll-opt .grow { min-width: 0; }
+.poll-opt[disabled] { cursor: default; }
+.date-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; }
+.date-cell { display: grid; justify-items: center; gap: 1px; padding: 8px 4px; border-radius: 14px; border: 1px solid var(--hairline-2); background: #fff; font: inherit; color: #111; cursor: pointer; }
+.date-cell small { font-size: 11px; color: var(--text-2); }
+.date-cell b { font-size: 13px; }
+.dc-n { display: inline-flex; align-items: center; gap: 2px; font-size: 11px; color: var(--text-2); }
+.date-cell.best { border-color: #30d158; box-shadow: inset 0 0 0 1px #30d158; }
+.date-cell.on { background: #111; color: #fff; border-color: #111; }
+.date-cell.on small, .date-cell.on .dc-n { color: rgba(255, 255, 255, .75); }
+.cc-who { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 12px; color: var(--text-2); }
+.cc-who span { display: inline-flex; align-items: center; gap: 4px; }
+.survey-q { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: 14px; color: var(--text-2); }
+.survey-answers { display: grid; gap: 18px; margin-top: 16px; }
+.survey-answers h3 { font-size: 15px; margin-bottom: 8px; }
+.sa { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; padding: 6px 0; border-top: 1px solid var(--hairline); }
+.item-share { display: flex; gap: 12px; align-items: center; color: #111; min-width: 0; }
+.item-share:hover { text-decoration: none; }
+.item-share .grow { display: grid; min-width: 0; }
+.item-share small { font-size: 12px; color: var(--text-2); }
+.item-share b { font-size: 15px; }
+.is-media { position: relative; width: 56px; height: 56px; flex: none; border-radius: 14px; overflow: hidden; display: grid; place-items: center; background: var(--c); color: #fff; }
+.is-media img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.day-share, .pay-share { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: 14px; }
+.day-share li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.day-share i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.day-share .mono { font-size: 12px; color: var(--text-2); width: 40px; flex: none; }
+.pay-share li { display: flex; align-items: center; gap: 8px; }
+.pbar { width: 70px; height: 6px; border-radius: 3px; background: var(--fill); overflow: hidden; flex: none; }
+.pbar i { display: block; height: 100%; background: #30d158; }
+.pay-share b { min-width: 72px; text-align: right; }
+.attach-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+@media (min-width: 560px) { .attach-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.attach-tile { display: grid; justify-items: start; gap: 4px; padding: 14px; border-radius: 18px; border: 1px solid var(--hairline); background: var(--fill); font: inherit; text-align: left; color: #111; cursor: pointer; }
+.attach-tile:hover { background: var(--fill-2); }
+.attach-tile .cc-ic { margin-bottom: 6px; }
+.attach-tile b { font-size: 14px; }
+.attach-tile small { font-size: 12px; color: var(--text-2); }
+.opt-list { display: grid; gap: 8px; }
+.check-row { display: flex; align-items: center; gap: 8px; text-transform: none; letter-spacing: 0; font-size: 14px; font-weight: 500; color: var(--text); }
+.check-row input { width: 18px; height: 18px; }
+.mini-cal { border: 1px solid var(--hairline); border-radius: 18px; padding: 12px; }
+.mc-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; text-transform: capitalize; }
+.mc-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; text-align: center; }
+.mc-dow { font-size: 11px; color: var(--text-3); padding: 4px 0; }
+.mc-day { aspect-ratio: 1; border: 0; border-radius: 50%; background: transparent; font: inherit; font-size: 14px; cursor: pointer; color: #111; }
+.mc-day:hover { background: var(--fill); }
+.mc-day.on { background: #111; color: #fff; }
+.mc-day[disabled] { color: var(--text-3); cursor: default; background: none; }
+.day-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* Cena: celkem / za osobu */
+.price-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.money-input { position: relative; flex: 1; min-width: 140px; }
+.money-input input { padding-right: 44px; }
+.money-input span { position: absolute; right: 16px; top: 50%; transform: translateY(-50%); color: var(--text-2); font-size: 14px; }
+.pay-hint { margin-top: 6px; min-height: 18px; }
+.r-price { text-align: right; }
+.r-price small, .stay-price small { font-size: 11px; color: var(--text-2); font-weight: 500; }
+.stay-price { display: grid; }
+.quick-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+@media (min-width: 560px) and (max-width: 899px) { .quick-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.q-tile { padding: 12px; gap: 2px; }
+.q-tile .q-ic { width: 30px; height: 30px; border-radius: 10px; margin-bottom: 4px; }
+.q-tile .q-ic .ms { font-size: 18px; }
+.q-tile b { font-size: 13px; line-height: 18px; }
+.q-tile small { font-size: 11px; line-height: 14px; }
+.msg-col:has(.chat-card) { width: min(420px, 100%); }
+.chat-card.place-card { padding: 10px; box-shadow: var(--shadow-2); }
+.msg-col .chat-card { width: 100%; }
+.quick-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (min-width: 560px) and (max-width: 899px) { .quick-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.q-tile { justify-items: center; text-align: center; padding: 12px 6px; }
+.q-tile small { display: none; }
+.q-tile b { font-size: 12px; line-height: 16px; }
